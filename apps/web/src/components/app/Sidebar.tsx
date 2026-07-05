@@ -11,9 +11,14 @@ interface Props {
     snippet?: number;
   };
   isAdmin?: boolean;
+  /** Presence of /app routes whose pages may be absent from this build (the
+   *  open-core carve omits the enterprise pages). Computed server-side by the
+   *  layouts via lib/app-routes.ts; omitted keys default to visible so call
+   *  sites that don't pass it keep today's behavior. */
+  routes?: { graph?: boolean; meetings?: boolean; admin?: boolean };
 }
 
-export function Sidebar({ currentPath, workspaceMode, typeCounts = {}, isAdmin = false }: Props) {
+export function Sidebar({ currentPath, workspaceMode, typeCounts = {}, isAdmin = false, routes = {} }: Props) {
   const typeParam = currentPath.includes('?')
     ? new URLSearchParams(currentPath.split('?')[1]).get('type')
     : null;
@@ -42,6 +47,10 @@ export function Sidebar({ currentPath, workspaceMode, typeCounts = {}, isAdmin =
   const isOnRequests  = currentPath.startsWith('/app/requests');
 
   const isDevProject = workspaceMode === 'dev_project';
+
+  const showMeetingsNav = routes.meetings ?? true;
+  const showGraphNav    = routes.graph ?? true;
+  const showAdminNav    = routes.admin ?? true;
 
   const showEng = (typeCounts.engineering ?? 0) > 0;
   const showInst = (typeCounts.instruction ?? 0) > 0;
@@ -150,16 +159,18 @@ export function Sidebar({ currentPath, workspaceMode, typeCounts = {}, isAdmin =
       {/* ── MEETINGS ─────────────────────────────── */}
       <div className="sb-section">
         <div className="sb-section-head"><span>Meetings</span></div>
-        <a href="/app/meetings" className={`sb-row${isOnMeetings ? ' active' : ''}`}>
-          <span className="sb-l">
-            <span className="sb-icon">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-              </svg>
+        {showMeetingsNav && (
+          <a href="/app/meetings" className={`sb-row${isOnMeetings ? ' active' : ''}`}>
+            <span className="sb-l">
+              <span className="sb-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+              </span>
+              <span className="sb-label">Meetings</span>
             </span>
-            <span className="sb-label">Meetings</span>
-          </span>
-        </a>
+          </a>
+        )}
         <a href="/app/requests" className={`sb-row${isOnRequests ? ' active' : ''}`}>
           <span className="sb-l">
             <span className="sb-icon">
@@ -248,23 +259,25 @@ export function Sidebar({ currentPath, workspaceMode, typeCounts = {}, isAdmin =
       )}
 
       {/* ── GRAPH (both modes) ───────────────────── */}
-      <div className="sb-section">
-        <div className="sb-section-head"><span>Knowledge</span></div>
-        <a href="/app/graph" className={`sb-row${isOnGraph ? ' active' : ''}`}>
-          <span className="sb-l">
-            <span className="sb-icon">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/>
-                <line x1="7" y1="11.5" x2="17" y2="6"/><line x1="7" y1="12.5" x2="17" y2="18"/>
-              </svg>
+      {showGraphNav && (
+        <div className="sb-section">
+          <div className="sb-section-head"><span>Knowledge</span></div>
+          <a href="/app/graph" className={`sb-row${isOnGraph ? ' active' : ''}`}>
+            <span className="sb-l">
+              <span className="sb-icon">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/>
+                  <line x1="7" y1="11.5" x2="17" y2="6"/><line x1="7" y1="12.5" x2="17" y2="18"/>
+                </svg>
+              </span>
+              <span className="sb-label">Graph</span>
             </span>
-            <span className="sb-label">Graph</span>
-          </span>
-        </a>
-      </div>
+          </a>
+        </div>
+      )}
 
       {/* ── ADMIN (staff only) ───────────────────── */}
-      {isAdmin && (
+      {isAdmin && showAdminNav && (
         <div className="sb-section">
           <div className="sb-section-head"><span>Admin</span></div>
           <a href="/app/admin" className={`sb-row${isOnAdmin && !currentPath.startsWith('/app/admin/licenses') && !currentPath.startsWith('/app/admin/logs') && !currentPath.startsWith('/app/admin/audit') ? ' active' : ''}`}>

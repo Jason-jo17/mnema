@@ -1,6 +1,7 @@
 ---
 import BaseLayout from './BaseLayout.astro';
 import { Sidebar } from '../components/app/Sidebar';
+import { hasAppRoute } from '../lib/app-routes';
 import { WorkspaceSwitcher } from '../components/nav/WorkspaceSwitcher';
 
 import type { DocFolder, SourceAttachment } from '@boppl/shared';
@@ -37,6 +38,14 @@ const workspaceName = wsProp ?? (domainPart
 const userInitial = (email?.[0] ?? auth.email[0] ?? 'U').toUpperCase();
 
 const pathname = Astro.url.pathname;
+
+// Sidebar rows for pages this build may not ship (the open-core carve omits
+// the enterprise pages) — presence is read off the built routes.
+const navRoutes = {
+  graph: hasAppRoute('graph'),
+  meetings: hasAppRoute('meetings'),
+  admin: hasAppRoute('admin'),
+};
 
 const apiUrl =
   (import.meta.env.PUBLIC_API_URL as string | undefined) ?? 'http://localhost:8080';
@@ -353,6 +362,7 @@ try {
         currentPath={pathname}
         typeCounts={typeCounts}
         workspaceMode={workspaceMode}
+        routes={navRoutes}
         client:load
       />
     </aside>
