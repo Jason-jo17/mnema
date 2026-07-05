@@ -14,7 +14,9 @@ It is the full core product and runs on its own; the enterprise modules are sepa
 
 ## Quickstart (self-host, ~90 seconds)
 
-Requirements: **Docker + Docker Compose**.
+Requirements: **Docker + Docker Compose**. (Working on the code itself, outside
+Docker? **Node 22** — `nvm use` picks it up from [`.nvmrc`](./.nvmrc) — and
+**pnpm 10**; see [CONTRIBUTING.md](./CONTRIBUTING.md).)
 
 ```bash
 git clone https://github.com/nbkdoesntknowcoding/mnema.git
