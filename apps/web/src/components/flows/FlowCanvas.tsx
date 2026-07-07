@@ -25,6 +25,7 @@ import { DocNode }         from './nodes/DocNode';
 import { DocsNode }        from './nodes/DocsNode';
 import { InstructionNode } from './nodes/InstructionNode';
 import { DecisionNode }    from './nodes/DecisionNode';
+import { CaptureNode }     from './nodes/CaptureNode';
 import { FlowEdge }        from './edges/FlowEdge';
 import { BranchEdge }      from './edges/BranchEdge';
 import { NodeInspector }   from './NodeInspector';
@@ -33,8 +34,11 @@ import { WalkSimulator }        from './WalkSimulator';
 import { DocSidebar }           from './DocSidebar';
 import { AddNodePalette }       from './AddNodePalette';
 import { VersionHistoryPanel }  from './VersionHistoryPanel';
+import { RunHistoryPanel, stepStatusColor }      from './RunHistoryPanel';
+import type { StepRow }         from './RunHistoryPanel';
 import { PublishModal }         from './PublishModal';
 import { detectCycle }          from '../../lib/flows/cycle-detect';
+import { layeredLayout }        from '../../lib/flows/auto-layout';
 import { FLOW_TOKENS as T }     from './tokens';
 
 export interface Flow {
@@ -48,7 +52,7 @@ export interface Flow {
   is_published: boolean;
   nodes: Array<{
     client_node_id: string;
-    kind: 'doc' | 'docs' | 'instruction' | 'decision';
+    kind: 'doc' | 'docs' | 'instruction' | 'decision' | 'capture';
     title: string;
     position_x: number;
     position_y: number;
@@ -61,7 +65,7 @@ export interface Flow {
   }>;
 }
 
-type NodeKind = 'doc' | 'docs' | 'instruction' | 'decision';
+type NodeKind = 'doc' | 'docs' | 'instruction' | 'decision' | 'capture';
 
 // ─── Adapters ─────────────────────────────────────────────────────────────────
 
@@ -122,7 +126,7 @@ function enrichNodes(nodes: Node[], edges: Edge[]): Node[] {
 // ─── Node / Edge type maps ────────────────────────────────────────────────────
 
 const nodeTypes: NodeTypes = {
-  doc: DocNode, docs: DocsNode, instruction: InstructionNode, decision: DecisionNode,
+  doc: DocNode, docs: DocsNode, instruction: InstructionNode, decision: DecisionNode, capture: CaptureNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -139,6 +143,7 @@ function defaultData(kind: NodeKind): Record<string, unknown> {
     case 'docs':        return { doc_ids: [], instruction: '' };
     case 'instruction': return { text: '', pause_for_user_input: false };
     case 'decision':    return { question: '', branches: { yes: null, no: null }, default_branch: 'yes' };
+    case 'capture':     return { title_hint: '', instruction: '', autonomous: false };
   }
 }
 
@@ -167,8 +172,45 @@ function InnerCanvas({ flow }: InnerProps) {
   // Enriched nodes with isEntry/isExit computed from edges
   const enrichedNodes = useMemo(() => enrichNodes(nodes, edges), [nodes, edges]);
 
+  // ─── Run-execution overlay (n8n-style replay on the canvas) ────────────────
+  // When a run is open in the RunHistoryPanel, its steps drive per-node styling:
+  // nodes light up by status; nodes not touched by the run dim out.
+  const [runOverlay, setRunOverlay] = useState<StepRow[] | null>(null);
+  const [runFocusNodeId, setRunFocusNodeId] = useState<string | null>(null);
+
+  const runStatusByNode = useMemo(() => {
+    if (!runOverlay) return null;
+    const m = new Map<string, string>();
+    for (const s of runOverlay) m.set(s.nodeId, s.status);
+    return m;
+  }, [runOverlay]);
+
+  // Overlay styling is applied last so it composes on top of enrichment.
+  const displayNodes = useMemo(() => {
+    if (!runStatusByNode) return enrichedNodes;
+    return enrichedNodes.map((n) => {
+      const status = runStatusByNode.get(n.id);
+      const touched = status && status !== 'pending';
+      const color = status ? stepStatusColor(status) : '#52525b';
+      return {
+        ...n,
+        style: {
+          ...(n.style ?? {}),
+          opacity: touched ? 1 : 0.4,
+          outline: touched ? `2px solid ${color}` : '2px solid transparent',
+          outlineOffset: 2,
+          borderRadius: 12,
+          boxShadow: touched ? `0 0 0 4px ${color}22` : 'none',
+          transition: 'opacity 150ms, outline-color 150ms',
+        },
+      };
+    });
+  }, [enrichedNodes, runStatusByNode]);
+
   const [selectedNodeId, setSelectedNodeId]       = useState<string | null>(null);
   const [walkMode,       setWalkMode]             = useState(false);
+  const [docsOpen,       setDocsOpen]             = useState(false);
+  const [runsOpen,       setRunsOpen]             = useState(false);
   const [historyOpen,    setHistoryOpen]          = useState(false);
   const [publishOpen,    setPublishOpen]          = useState(false);
   const [saveState,      setSaveState]            = useState<SaveState>('idle');
@@ -178,7 +220,7 @@ function InnerCanvas({ flow }: InnerProps) {
   const [isPublished,    setIsPublished]          = useState(!!flow.is_published);
   const [hasUnpublished, setHasUnpublished]       = useState(flow.has_unpublished_changes ?? !flow.is_published);
 
-  const rfInstance   = useRef<{ getViewport: () => { x: number; y: number; zoom: number }; setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void } | null>(null);
+  const rfInstance   = useRef<{ getViewport: () => { x: number; y: number; zoom: number }; setCenter: (x: number, y: number, opts?: { zoom?: number; duration?: number }) => void; fitView: (opts?: { padding?: number; duration?: number; maxZoom?: number }) => void } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const nodesRef     = useRef(nodes);
   const edgesRef     = useRef(edges);
@@ -313,7 +355,7 @@ function InnerCanvas({ flow }: InnerProps) {
       : { x: 400, y: 200 };
 
     const label = kind === 'doc' ? 'New Doc' : kind === 'docs' ? 'New Docs'
-      : kind === 'instruction' ? 'New Instruction' : 'New Decision';
+      : kind === 'instruction' ? 'New Instruction' : kind === 'capture' ? 'New Capture' : 'New Decision';
     const id = makeClientNodeId(label, nodesRef.current);
     const newNode: Node = {
       id, type: kind,
@@ -329,6 +371,22 @@ function InnerCanvas({ flow }: InnerProps) {
     setTimeout(() => {
       rfInstance.current?.setCenter(pos.x + 120, pos.y + 60, { zoom: 1, duration: 300 });
     }, 50);
+  }, [setNodes, markDirty, pushHistory]);
+
+  // ─── Auto-arrange ─────────────────────────────────────────────────────────
+
+  const handleAutoArrange = useCallback(() => {
+    const cur = nodesRef.current;
+    if (!cur.length) return;
+    const pos = layeredLayout(
+      cur.map(n => ({ id: n.id })),
+      edgesRef.current.map(e => ({ source: e.source, target: e.target })),
+      { startX: 500, startY: 120 },
+    );
+    pushHistory(cur, edgesRef.current);
+    setNodes(ns => ns.map(n => (pos[n.id] ? { ...n, position: pos[n.id] } : n)));
+    markDirty();
+    setTimeout(() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 }), 60);
   }, [setNodes, markDirty, pushHistory]);
 
   // ─── Drop from DocSidebar ─────────────────────────────────────────────────
@@ -406,7 +464,13 @@ function InnerCanvas({ flow }: InnerProps) {
     };
   }, [nodes, selectedNodeId]);
 
-  const handleNodeClick  = useCallback((_: unknown, node: Node) => { setSelectedNodeId(node.id); setHistoryOpen(false); }, []);
+  const handleNodeClick  = useCallback((_: unknown, node: Node) => {
+    // While a run is being replayed, a node click inspects that step in the panel
+    // (keeps the execution view open) rather than opening the node editor.
+    if (runOverlay) { setRunFocusNodeId(node.id); return; }
+    setSelectedNodeId(node.id);
+    setHistoryOpen(false);
+  }, [runOverlay]);
   const handlePaneClick  = useCallback(() => setSelectedNodeId(null), []);
   const handleRestored   = useCallback(() => window.location.reload(), []);
   const handlePublished  = useCallback(() => { setIsPublished(true); setHasUnpublished(false); setIsDirty(false); }, []);
@@ -417,7 +481,21 @@ function InnerCanvas({ flow }: InnerProps) {
 
   return (
     <div className="h-[calc(100vh-48px)] flex">
-      <DocSidebar />
+      <div
+        className="flex-none flex flex-col items-center py-3 border-r"
+        style={{ width: 36, background: '#121317', borderColor: 'rgba(255,255,255,0.06)' }}
+      >
+        <button
+          onClick={() => setDocsOpen(o => !o)}
+          title={docsOpen ? 'Hide docs' : 'Show docs to drag onto the canvas'}
+          style={{
+            width: 28, height: 28, borderRadius: 6, cursor: 'pointer',
+            background: docsOpen ? '#22252b' : 'transparent',
+            border: '0.5px solid rgba(255,255,255,0.12)', color: '#a1a1aa', fontSize: 14, lineHeight: 1,
+          }}
+        >{docsOpen ? '‹' : '☰'}</button>
+      </div>
+      {docsOpen && <DocSidebar />}
 
       <div className="flex-1 relative flex flex-col overflow-hidden">
         <FlowHeader
@@ -447,7 +525,7 @@ function InnerCanvas({ flow }: InnerProps) {
 
           <ReactFlow
             style={{ width: '100%', height: '100%' }}
-            nodes={enrichedNodes}
+            nodes={displayNodes}
             edges={edges}
             onNodesChange={handleNodesChange}
             onEdgesChange={handleEdgesChange}
@@ -456,6 +534,7 @@ function InnerCanvas({ flow }: InnerProps) {
               rfInstance.current = {
                 getViewport: () => instance.getViewport(),
                 setCenter:   (x, y, opts) => instance.setCenter(x, y, opts),
+                fitView:     (opts) => instance.fitView(opts),
               };
             }}
             nodeTypes={nodeTypes}
@@ -478,6 +557,44 @@ function InnerCanvas({ flow }: InnerProps) {
               size={T.canvasDotSize}
               color={T.canvasDot}
             />
+            <Panel position="top-left">
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={handleAutoArrange}
+                  title="Lay the graph out top-to-bottom"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    height: 30, padding: '0 11px', fontSize: 12, fontWeight: 500,
+                    color: '#e4e4e7', background: '#18181b',
+                    border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 7, cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontSize: 14, lineHeight: 1 }}>⤵</span> Auto-arrange
+                </button>
+                <button
+                  onClick={() => rfInstance.current?.fitView({ padding: 0.2, duration: 400 })}
+                  title="Fit all nodes in view"
+                  style={{
+                    height: 30, padding: '0 11px', fontSize: 12, fontWeight: 500,
+                    color: '#a1a1aa', background: '#18181b',
+                    border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: 7, cursor: 'pointer',
+                  }}
+                >
+                  Fit
+                </button>
+                <button
+                  onClick={() => { setRunsOpen(o => { if (o) { setRunOverlay(null); setRunFocusNodeId(null); } return !o; }); setHistoryOpen(false); }}
+                  title="Run history — see past executions and what each produced"
+                  style={{
+                    height: 30, padding: '0 11px', fontSize: 12, fontWeight: 500,
+                    color: runsOpen ? '#2dd4bf' : '#a1a1aa', background: '#18181b',
+                    border: `0.5px solid ${runsOpen ? 'rgba(45,212,191,0.4)' : 'rgba(255,255,255,0.12)'}`, borderRadius: 7, cursor: 'pointer',
+                  }}
+                >
+                  Runs
+                </button>
+              </div>
+            </Panel>
             <Controls
               position="bottom-left"
               showInteractive={false}
@@ -492,7 +609,7 @@ function InnerCanvas({ flow }: InnerProps) {
               nodeColor={node => {
                 const colors: Record<string, string> = {
                   instruction: '#fbbf24', doc: '#60a5fa',
-                  docs: '#60a5fa', decision: '#a78bfa',
+                  docs: '#60a5fa', decision: '#a78bfa', capture: '#2dd4bf',
                 };
                 return colors[node.type ?? ''] || '#52525b';
               }}
@@ -530,6 +647,15 @@ function InnerCanvas({ flow }: InnerProps) {
       {/* Right panels */}
       {historyOpen && !selectedNodeId && (
         <VersionHistoryPanel flowId={flow.id} onClose={() => setHistoryOpen(false)} onRestored={handleRestored} />
+      )}
+      {runsOpen && !selectedNodeId && (
+        <RunHistoryPanel
+          flowId={flow.id}
+          onClose={() => { setRunsOpen(false); setRunOverlay(null); setRunFocusNodeId(null); }}
+          onRunActive={(_runId, steps) => setRunOverlay(steps.length ? steps : null)}
+          focusNodeId={runFocusNodeId}
+          onFocusConsumed={() => setRunFocusNodeId(null)}
+        />
       )}
       {selectedNode && !historyOpen && (
         <NodeInspector

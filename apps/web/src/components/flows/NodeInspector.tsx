@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { X, FileText, Layers, MessageSquare, GitBranch, Trash2, Plus } from 'lucide-react';
+import { X, FileText, Layers, MessageSquare, GitBranch, Trash2, Plus, FilePlus2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { MonoLabel } from '../ui/typography';
 import { DocPicker } from './DocPicker';
 
 interface FlowNode {
   client_node_id: string;
-  kind: 'doc' | 'docs' | 'instruction' | 'decision';
+  kind: 'doc' | 'docs' | 'instruction' | 'decision' | 'capture';
   title: string;
   position_x: number;
   position_y: number;
@@ -79,6 +79,7 @@ export function NodeInspector({ node, onClose, onUpdateTitle, onUpdateData, onDe
         {node.kind === 'docs'        && <DocsInspectorBody        data={node.data} onChange={p => onUpdateData(node.client_node_id, p)} />}
         {node.kind === 'instruction' && <InstructionInspectorBody data={node.data} onChange={p => onUpdateData(node.client_node_id, p)} />}
         {node.kind === 'decision'    && <DecisionInspectorBody    data={node.data} onChange={p => onUpdateData(node.client_node_id, p)} />}
+        {node.kind === 'capture'     && <CaptureInspectorBody     data={node.data} onChange={p => onUpdateData(node.client_node_id, p)} />}
       </div>
 
       <div className="border-t border-[var(--line)] px-5 py-3">
@@ -97,6 +98,7 @@ function KindIcon({ kind }: { kind: string }) {
     case 'docs':        return <Layers      size={14} strokeWidth={1.75} className={cls} />;
     case 'instruction': return <MessageSquare size={14} strokeWidth={1.75} className={cls} />;
     case 'decision':    return <GitBranch   size={14} strokeWidth={1.75} className="text-[var(--status-warning)]" />;
+    case 'capture':     return <FilePlus2   size={14} strokeWidth={1.75} className={cls} />;
     default:            return null;
   }
 }
@@ -152,7 +154,7 @@ function DocInspectorBody({ data, onChange }: { data: Record<string, unknown>; o
         <DocPicker value={docId} onChange={(id, title) => onChange({ doc_id: id ?? undefined, doc_title: title })} />
         {!docId && <InlineWarning msg="Select a doc so Claude knows what to read." />}
         {docId && (
-          <a href={`/app/d/${docId}`} target="_blank" rel="noopener noreferrer"
+          <a href={`/app/content/${docId}`} target="_blank" rel="noopener noreferrer"
             className="block mt-1.5 text-[11px] text-[var(--ink-muted)] hover:text-[var(--ink-soft)] underline underline-offset-2">
             Open doc →
           </a>
@@ -200,6 +202,83 @@ function DocsInspectorBody({ data, onChange }: { data: Record<string, unknown>; 
         <textarea value={instruction} onChange={e => onChange({ instruction: e.target.value })} placeholder="What should Claude do with these docs?" rows={4}
           className="w-full px-2.5 py-2 text-[13px] bg-[var(--canvas)] border border-[var(--line)] rounded-[var(--radius-md)] text-[var(--ink)] placeholder:text-[var(--ink-faint)] outline-none focus:border-[var(--line-bright)] resize-none transition-colors leading-[1.6]" />
       </div>
+    </>
+  );
+}
+
+// ─── Capture ──────────────────────────────────────────────────────────────────
+
+function CaptureInspectorBody({ data, onChange }: { data: Record<string, unknown>; onChange: (p: Record<string, unknown>) => void }) {
+  const titleHint    = typeof data.title_hint === 'string' ? data.title_hint : '';
+  const instruction  = typeof data.instruction === 'string' ? data.instruction : '';
+  const targetFolder = typeof data.target_folder_id === 'string' ? data.target_folder_id : '';
+  const autonomous   = data.autonomous === true;
+  const INSTR_MAX    = 2000;
+
+  return (
+    <>
+      <div>
+        <MonoLabel className="block mb-1.5">Doc title hint</MonoLabel>
+        <input
+          type="text"
+          value={titleHint}
+          onChange={e => onChange({ title_hint: e.target.value })}
+          placeholder="E.g. 'Compliance findings'"
+          maxLength={200}
+          className="w-full px-2.5 py-2 text-[13px] bg-[var(--canvas)] border border-[var(--line)] rounded-[var(--radius-md)] text-[var(--ink)] placeholder:text-[var(--ink-faint)] outline-none focus:border-[var(--line-bright)] transition-colors"
+        />
+        {!titleHint.trim() && <InlineWarning msg="Name the doc the agent should create." />}
+      </div>
+
+      <div>
+        <MonoLabel className="block mb-1.5">Capture instruction</MonoLabel>
+        <textarea
+          value={instruction}
+          onChange={e => onChange({ instruction: e.target.value })}
+          placeholder={"What should Claude produce and write?\nE.g. 'Research the vendor and write your findings.'"}
+          rows={7}
+          maxLength={INSTR_MAX}
+          className="w-full px-2.5 py-2 text-[13px] bg-[var(--canvas)] border border-[var(--line)] rounded-[var(--radius-md)] text-[var(--ink)] placeholder:text-[var(--ink-faint)] outline-none focus:border-[var(--line-bright)] resize-none transition-colors leading-[1.65]"
+        />
+        <p className="text-[11px] text-[var(--ink-faint)] mt-0.5 text-right">{instruction.length}/{INSTR_MAX}</p>
+        {!instruction.trim() && <InlineWarning msg="Tell Claude what to produce for this capture." />}
+      </div>
+
+      <div>
+        <MonoLabel className="block mb-1.5">Target folder ID <span className="font-normal text-[var(--ink-faint)]">(optional)</span></MonoLabel>
+        <input
+          type="text"
+          value={targetFolder}
+          onChange={e => onChange({ target_folder_id: e.target.value.trim() || undefined })}
+          placeholder="Folder UUID — defaults to workspace root"
+          className="w-full px-2.5 py-2 text-[12px] font-mono bg-[var(--canvas)] border border-[var(--line)] rounded-[var(--radius-md)] text-[var(--ink-soft)] placeholder:text-[var(--ink-faint)] outline-none focus:border-[var(--line-bright)] transition-colors"
+        />
+      </div>
+
+      {/* Autonomous — the one setting that changes the trust model; styled as danger. */}
+      <label
+        className="flex items-start gap-3 cursor-pointer rounded-[var(--radius-md)] p-3"
+        style={{
+          background: autonomous ? 'rgba(248,113,113,0.07)' : 'transparent',
+          border: `0.5px solid ${autonomous ? 'rgba(248,113,113,0.35)' : 'var(--line)'}`,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={autonomous}
+          onChange={e => onChange({ autonomous: e.target.checked })}
+          className="mt-0.5"
+          style={{ accentColor: '#f87171' }}
+        />
+        <div>
+          <p className="text-[13px] leading-tight" style={{ color: autonomous ? '#f87171' : 'var(--ink)' }}>
+            Autonomous write
+          </p>
+          <p className="text-[11.5px] mt-0.5" style={{ color: autonomous ? '#fca5a5' : 'var(--ink-muted)' }}>
+            Writes without approval. The agent creates this doc directly during a walk, with no review step.
+          </p>
+        </div>
+      </label>
     </>
   );
 }

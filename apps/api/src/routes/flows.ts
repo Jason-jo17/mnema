@@ -4,7 +4,7 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { config } from '../config/env.js';
 import { db } from '../db/index.js';
-import { flows, flowVersions, flowNodes, flowEdges, users } from '../db/schema.js';
+import { flows, flowVersions, flowNodes, flowEdges, flowRuns, flowRunSteps, users } from '../db/schema.js';
 import { withTenant } from '../db/with-tenant.js';
 import { renderNodeContent, topologicalWalk } from '../lib/flows/walk.js';
 import { enforceFreeFlowLimit } from '../plugins/free-limits.js';
@@ -1008,5 +1008,39 @@ export const flowsRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(flowEdges.flowVersionId, versionId));
 
     return reply.send({ name: fl[0].name, description: fl[0].description, published: true, nodes, edges });
+  });
+
+  // ── Flow run history (n8n-style executions) ────────────────────────────────
+  app.get<{ Params: { id: string } }>('/api/flows/:id/runs', async (req, reply) => {
+    if (!req.auth) return reply.code(401).send({ error: 'unauthorized' });
+    const runs = await withTenant(req.auth.tenant_id, async (tx) => {
+      const flow = await resolveFlow(tx, req.params.id);
+      if (!flow) return null;
+      return tx
+        .select()
+        .from(flowRuns)
+        .where(eq(flowRuns.flowId, flow.id))
+        .orderBy(desc(flowRuns.startedAt))
+        .limit(50);
+    });
+    if (runs === null) return reply.code(404).send({ error: 'flow_not_found' });
+    return reply.send({ runs });
+  });
+
+  app.get<{ Params: { runId: string } }>('/api/flow-runs/:runId', async (req, reply) => {
+    if (!req.auth) return reply.code(401).send({ error: 'unauthorized' });
+    const detail = await withTenant(req.auth.tenant_id, async (tx) => {
+      const runRows = await tx.select().from(flowRuns).where(eq(flowRuns.id, req.params.runId)).limit(1);
+      const run = runRows[0];
+      if (!run) return null;
+      const steps = await tx
+        .select()
+        .from(flowRunSteps)
+        .where(eq(flowRunSteps.runId, run.id))
+        .orderBy(flowRunSteps.stepIndex);
+      return { run, steps };
+    });
+    if (!detail) return reply.code(404).send({ error: 'run_not_found' });
+    return reply.send(detail);
   });
 };

@@ -1066,6 +1066,82 @@ export const flowEdges = pgTable(
   }),
 );
 
+export const flowRuns = pgTable(
+  'flow_runs',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    flowId: uuid('flow_id')
+      .notNull()
+      .references(() => flows.id, { onDelete: 'cascade' }),
+    flowVersionId: uuid('flow_version_id').references(() => flowVersions.id, { onDelete: 'set null' }),
+    flowSlug: text('flow_slug').notNull(),
+    flowName: text('flow_name').notNull(),
+    totalSteps: integer('total_steps').notNull().default(0),
+    capturedCount: integer('captured_count').notNull().default(0),
+    status: text('status').notNull().default('running'),
+    startedBy: uuid('started_by').references(() => users.id),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (table) => ({
+    flowIdx: index('flow_runs_flow_idx').on(table.flowId, table.startedAt),
+    workspaceIdx: index('flow_runs_workspace_idx').on(table.workspaceId, table.startedAt),
+  }),
+);
+
+/** What the model was served at a step (the "input" tab of the execution view). */
+export interface FlowRunStepInput {
+  instruction?: string;
+  content?: string;
+  content_type?: string;
+  source?: Record<string, unknown> | null;
+  /** For decision nodes: the branch options presented. */
+  branches?: { label: string; target_step_index: number }[];
+}
+
+/** What the model produced at a step (the "output" tab of the execution view). */
+export interface FlowRunStepOutput {
+  /** Free-text summary of what the model did (answer given, action taken). */
+  summary?: string;
+  /** For decision nodes: which branch label the model took. */
+  branch_taken?: string;
+  /** For capture nodes: the doc it wrote. */
+  doc_id?: string;
+  doc_title?: string;
+}
+
+export const flowRunSteps = pgTable(
+  'flow_run_steps',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => flowRuns.id, { onDelete: 'cascade' }),
+    stepIndex: integer('step_index').notNull(),
+    nodeId: text('node_id').notNull(),
+    kind: text('kind').notNull(),
+    title: text('title').notNull(),
+    status: text('status').notNull().default('pending'),
+    capturedDocId: uuid('captured_doc_id'),
+    capturedTitle: text('captured_title'),
+    // n8n-parity execution data: `input` = what the model was served at this step
+    // (instruction text, doc content, decision question); `output` = what it produced
+    // (answer, chosen branch, action summary, or captured-doc ref). Null until recorded.
+    input: jsonb('input').$type<FlowRunStepInput | null>(),
+    output: jsonb('output').$type<FlowRunStepOutput | null>(),
+    error: text('error'),
+    durationMs: integer('duration_ms'),
+    visitedAt: timestamp('visited_at', { withTimezone: true }),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+  },
+  (table) => ({
+    runStepUnique: unique('flow_run_steps_run_step_key').on(table.runId, table.stepIndex),
+  }),
+);
+
 // ============================================================================
 // Phase A — OAuth 2.1 Authorization Server
 // ============================================================================

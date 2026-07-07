@@ -13,6 +13,16 @@ import { getFlowWalkHtml } from './apps/flow-walk-html.js';
 import { getFlowBuilderHtml } from './apps/flow-builder-html.js';
 import { getGraphExplorerHtml } from './apps/graph-explorer-html.js';
 import { GET_FLOW_STEP_TOOL, getFlowStepStructured } from './tools/get-flow-step.js';
+import {
+  SUBMIT_FLOW_CAPTURE_TOOL_NAME,
+  SUBMIT_FLOW_CAPTURE_TOOL_SPEC,
+  submitFlowCapture,
+} from './tools/submit-flow-capture.js';
+import {
+  SUBMIT_FLOW_STEP_RESULT_TOOL_NAME,
+  SUBMIT_FLOW_STEP_RESULT_TOOL_SPEC,
+  submitFlowStepResult,
+} from './tools/submit-flow-step-result.js';
 import { GET_FLOW_TOOL, getFlowStructured } from './tools/get-flow.js';
 import {
   PROPOSE_DOC_WRITE_TOOL_NAME,
@@ -582,6 +592,76 @@ export function createMcpServer(ctx: McpAuthContext): McpServer {
         if (err instanceof McpForbiddenError) throw err;
         const message = err instanceof Error ? err.message : String(err);
         return { isError: true, content: [{ type: 'text' as const, text: message }] };
+      }
+    },
+  );
+
+  // Registered as a PLAIN tool (mcpServer.registerTool), exactly like add_flow_node
+  // and the other production tools — NOT an App tool. The App-tool registration was
+  // silently absent from tools/list on the deployed connector (identical code to
+  // get_flow_step, which does appear — root cause unresolved), so this uses the
+  // registration path that is known to surface reliably. Gated path returns the
+  // proposal_token in structuredContent; the agent shows the user and calls
+  // confirm_doc_write to commit (same as propose_doc_write in a no-panel client).
+  mcpServer.registerTool(
+    SUBMIT_FLOW_CAPTURE_TOOL_NAME,
+    {
+      description: SUBMIT_FLOW_CAPTURE_TOOL_SPEC.description,
+      inputSchema: jsonSchemaToZodShape(SUBMIT_FLOW_CAPTURE_TOOL_SPEC.inputSchema),
+      annotations: SUBMIT_FLOW_CAPTURE_TOOL_SPEC.annotations,
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (args: any) => {
+      try {
+        const result = await submitFlowCapture(ctx, args as Record<string, unknown>);
+        return {
+          isError: result.isError,
+          content: [{ type: 'text' as const, text: result.content }],
+          structuredContent: result.structuredContent,
+        };
+      } catch (err) {
+        const isForbidden = err instanceof McpForbiddenError;
+        const message = isForbidden
+          ? `This MCP token lacks workspace:write scope.`
+          : (err instanceof Error ? err.message : String(err));
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: message }],
+          structuredContent: { error: isForbidden ? 'forbidden' : 'handler_error', message },
+        };
+      }
+    },
+  );
+
+  // Walk-protocol companion to submit_flow_capture: records a NON-capture step's
+  // result (output) into the run-history execution view. Plain-tool registration
+  // (same reliability rationale as submit_flow_capture above).
+  mcpServer.registerTool(
+    SUBMIT_FLOW_STEP_RESULT_TOOL_NAME,
+    {
+      description: SUBMIT_FLOW_STEP_RESULT_TOOL_SPEC.description,
+      inputSchema: jsonSchemaToZodShape(SUBMIT_FLOW_STEP_RESULT_TOOL_SPEC.inputSchema),
+      annotations: SUBMIT_FLOW_STEP_RESULT_TOOL_SPEC.annotations,
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (args: any) => {
+      try {
+        const result = await submitFlowStepResult(ctx, args as Record<string, unknown>);
+        return {
+          isError: result.isError,
+          content: [{ type: 'text' as const, text: result.content }],
+          structuredContent: result.structuredContent,
+        };
+      } catch (err) {
+        const isForbidden = err instanceof McpForbiddenError;
+        const message = isForbidden
+          ? `This MCP token lacks the required scope.`
+          : (err instanceof Error ? err.message : String(err));
+        return {
+          isError: true,
+          content: [{ type: 'text' as const, text: message }],
+          structuredContent: { error: isForbidden ? 'forbidden' : 'handler_error', message },
+        };
       }
     },
   );

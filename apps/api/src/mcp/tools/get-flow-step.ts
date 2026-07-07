@@ -1,11 +1,17 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { flowEdges, flowNodes, flowVersions, flows } from '../../db/schema.js';
+import type { FlowRunStepInput } from '../../db/schema.js';
 import { withTenant } from '../../db/with-tenant.js';
+import { recordStepVisitedInTx } from '../../lib/flows/runs.js';
 import { renderNodeContent, topologicalWalk } from '../../lib/flows/walk.js';
 import type { McpAuthContext } from '../auth.js';
 import { requireScope } from '../scope.js';
 import { withAudit } from './audit.js';
+
+// Cap the served content stored as a step's `input` — a doc step can serve a huge
+// markdown body, and the doc already lives in its own row; we only need a preview.
+const MAX_INPUT_CONTENT = 8_000;
 
 export const GET_FLOW_STEP_TOOL_NAME = 'get_flow_step';
 
@@ -34,9 +40,13 @@ export const GET_FLOW_STEP_TOOL = {
     'NOT to be confused with get_flow: get_flow_step WALKS a PUBLISHED flow (by slug);',
     'get_flow EDITS a DRAFT graph (by UUID).',
     '',
-    'EXECUTION MODEL — a flow is a program, not a document. Walk it one step at a',
-    'time and ACT on each step before fetching the next one. Never pre-fetch all',
-    'steps and summarize them — that defeats the flow\'s purpose.',
+    'CALL THIS EXACTLY ONCE with step_index=1. That single call opens ONE Walk panel',
+    'which loads the ENTIRE flow (every step) and lets the user step through it with',
+    'the Next button inside the panel. After the one call, STOP and tell the user to',
+    'press Next in the panel to walk the flow — do NOT call get_flow_step again for',
+    'step 2, 3, ... Each call opens a brand-new panel; calling it per step is the bug.',
+    'Only call again if the user explicitly asks you to jump to or act on a specific',
+    'step. Do not summarize the flow yourself — the panel is the walkthrough.',
     '',
     'Each step has a `kind` that tells you how to handle it:',
     '  "instruction" — a directive from the flow author. Execute it immediately.',
@@ -74,6 +84,11 @@ export const GET_FLOW_STEP_TOOL = {
         minimum: 1,
         description: 'Which step to retrieve. 1-indexed; call in order.',
       },
+      run_id: {
+        type: 'string',
+        description:
+          'Optional run id from start_flow_run. When executing a flow (not just previewing), thread it here: each call records this step as visited and stores what was served, so the run-history execution view shows every step, not only captures.',
+      },
     },
     required: ['flow_id', 'step_index'],
     additionalProperties: false,
@@ -86,6 +101,7 @@ const argsSchema = z
     flow_id: z.string().min(1).max(64),
     // Coerce from string so clients that serialise integers as strings still work
     step_index: z.coerce.number().int().min(1),
+    run_id: z.string().uuid().optional(),
   })
   .strict();
 
@@ -189,7 +205,13 @@ export async function getFlowStep(
         // instruction-kind nodes are pure action directives (no content body).
         // Signal to Claude that it must pause and interact with the user before
         // fetching the next step.
-        const pauseForUserInput = node.kind === 'instruction';
+        // instruction nodes are action directives; a GATED capture node must also
+        // pause — the walk cannot advance past it until the human approves the
+        // proposed write and the doc is created (else the next step reads a doc that
+        // doesn't exist yet). An autonomous capture writes synchronously, so no pause.
+        const pauseForUserInput =
+          node.kind === 'instruction' ||
+          (node.kind === 'capture' && (node.data as Record<string, unknown> | null)?.autonomous !== true);
 
         return {
           flow_id: flow.slug,
@@ -313,7 +335,13 @@ export async function getFlowStepStructured(
         const rendered = await renderNodeContent(node, tx);
 
         const hasMore = args.step_index < ordered.length;
-        const pauseForUserInput = node.kind === 'instruction';
+        // instruction nodes are action directives; a GATED capture node must also
+        // pause — the walk cannot advance past it until the human approves the
+        // proposed write and the doc is created (else the next step reads a doc that
+        // doesn't exist yet). An autonomous capture writes synchronously, so no pause.
+        const pauseForUserInput =
+          node.kind === 'instruction' ||
+          (node.kind === 'capture' && (node.data as Record<string, unknown> | null)?.autonomous !== true);
 
         // 4) Build nodeToIndex map for decision branch resolution.
         const nodeToIndex = new Map<string, number>();
@@ -333,6 +361,27 @@ export async function getFlowStepStructured(
             .filter((b) => b.target_step_index > 0);
           const question = (node.data as Record<string, unknown> | null)?.question as string | undefined ?? node.title;
           decision = { question, branches };
+        }
+
+        // 5b) If this walk is part of a run, record the step as visited and store
+        // what we served as its `input` (powers the execution view's Input tab). Done
+        // inline in this walk tx — no second connection. Best-effort: a read-only
+        // preview walk simply omits run_id and nothing is recorded.
+        if (args.run_id) {
+          const served = rendered.content ?? '';
+          const input: FlowRunStepInput = {
+            instruction: rendered.instruction,
+            content:
+              served.length > MAX_INPUT_CONTENT ? served.slice(0, MAX_INPUT_CONTENT) + '\n\n…(truncated)' : served,
+            content_type: rendered.content_type,
+            source: rendered.source,
+            ...(decision ? { branches: decision.branches } : {}),
+          };
+          try {
+            await recordStepVisitedInTx(tx, { runId: args.run_id, nodeId: node.client_node_id, input });
+          } catch {
+            /* run-step recording is best-effort — never fail the walk on it */
+          }
         }
 
         // 6) Build structured content.
@@ -371,6 +420,8 @@ export async function getFlowStepStructured(
             ? rendered.instruction.slice(0, 100) + (rendered.instruction.length > 100 ? '…' : '')
             : '';
           content = `${prefix} (instruction) — ${snippet}`;
+        } else if (node.kind === 'capture') {
+          content = `${prefix} (capture) — produce the content, then submit it via submit_flow_capture.`;
         } else {
           content = `${prefix} (${node.kind}) — reference material available in the walk panel.`;
         }

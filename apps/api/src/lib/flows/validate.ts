@@ -21,7 +21,7 @@
  * the full list in one round-trip.
  */
 
-export type FlowNodeKind = 'doc' | 'docs' | 'instruction' | 'decision';
+export type FlowNodeKind = 'doc' | 'docs' | 'instruction' | 'decision' | 'capture';
 
 export interface FlowNode {
   client_node_id: string;
@@ -280,6 +280,42 @@ function validateNodeData(node: FlowNode): FlowValidationError[] {
         errors.push({
           code: 'invalid_node_data',
           message: `Node '${client_node_id}' of kind 'decision' requires a 'default_branch' string in data.`,
+          node_id: client_node_id,
+        });
+      }
+      break;
+    }
+    case 'capture': {
+      // A capture node is a design-time slot an agent fills at runtime by
+      // producing a doc (Phase 1: read-only shape; the write tool arrives Phase 2).
+      if (typeof data.title_hint !== 'string' || !(data.title_hint as string).trim()) {
+        errors.push({
+          code: 'invalid_node_data',
+          message: `Node '${client_node_id}' of kind 'capture' requires a non-empty 'title_hint' string in data.`,
+          node_id: client_node_id,
+        });
+      }
+      if (typeof data.instruction !== 'string' || !(data.instruction as string).trim()) {
+        errors.push({
+          code: 'invalid_node_data',
+          message: `Node '${client_node_id}' of kind 'capture' requires a non-empty 'instruction' string in data.`,
+          node_id: client_node_id,
+        });
+      }
+      if (
+        data.target_folder_id !== undefined &&
+        (typeof data.target_folder_id !== 'string' || !UUID_RE.test(data.target_folder_id))
+      ) {
+        errors.push({
+          code: 'invalid_node_data',
+          message: `Node '${client_node_id}' of kind 'capture' has an invalid 'target_folder_id' (must be a uuid).`,
+          node_id: client_node_id,
+        });
+      }
+      if (data.autonomous !== undefined && typeof data.autonomous !== 'boolean') {
+        errors.push({
+          code: 'invalid_node_data',
+          message: `Node '${client_node_id}' of kind 'capture' has a non-boolean 'autonomous'.`,
           node_id: client_node_id,
         });
       }

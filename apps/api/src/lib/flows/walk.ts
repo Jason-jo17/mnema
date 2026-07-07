@@ -233,6 +233,33 @@ export async function renderNodeContent(node: DbNodeRow, tx: Tx): Promise<Render
       };
     }
 
+    case 'capture': {
+      // Design-time slot the walking agent fills at runtime: it produces the
+      // content, then calls submit_flow_capture (Phase 2) to persist it as a doc.
+      // READ-ONLY here — no write happens on the walk read path.
+      const instruction = typeof data.instruction === 'string' ? data.instruction : '';
+      const titleHint = typeof data.title_hint === 'string' ? data.title_hint : '';
+      const autonomous = data.autonomous === true;
+      const directive = [
+        'CAPTURE STEP — produce the content described in the instruction above, then call the',
+        '`submit_flow_capture` tool to persist it, with:',
+        "  flow_slug: this flow's id (the flow_id in this response)",
+        `  node_id: "${node.client_node_id}"`,
+        '  title: a concise title' + (titleHint ? ` (hint: "${titleHint}")` : ''),
+        '  markdown: the content you produced',
+        autonomous
+          ? '  This node is AUTONOMOUS: the doc is written directly, with no human approval.'
+          : '  This capture is proposed for human approval before the doc is created.',
+      ].join('\n');
+      return {
+        instruction:
+          instruction || `Produce "${titleHint || 'the captured output'}" and submit it via submit_flow_capture.`,
+        content: directive,
+        content_type: 'capture',
+        source: { node_id: node.client_node_id, title_hint: titleHint || null, autonomous },
+      };
+    }
+
     default:
       return {
         instruction: '',

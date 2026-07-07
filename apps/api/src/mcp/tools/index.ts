@@ -18,6 +18,12 @@ import { REMOVE_FLOW_NODE_TOOL, removeFlowNode } from './remove-flow-node.js';
 import { RENAME_FOLDER_TOOL, renameFolder } from './rename-folder.js';
 import { SEARCH_DOCS_TOOL, searchDocs } from './search-docs.js';
 import { UPDATE_FLOW_NODE_TOOL, updateFlowNode } from './update-flow-node.js';
+// Flow run history (n8n-style executions).
+import { START_FLOW_RUN_TOOL, startFlowRunTool } from './start-flow-run.js';
+import {
+  LIST_FLOW_RUNS_TOOL, GET_FLOW_RUN_TOOL, LIST_FLOW_RUN_OUTPUTS_TOOL,
+  listFlowRunsTool, getFlowRunTool, listFlowRunOutputsTool,
+} from './flow-runs.js';
 // Sprint 4 Chunk E — project tools (both workspace modes)
 import { GET_PROJECT_TOOL, getProject } from './get-project.js';
 import { LIST_PROJECTS_TOOL, listProjects } from './list-projects.js';
@@ -104,6 +110,12 @@ export const PRODUCTION_TOOLS: readonly ToolDescriptor[] = [
   { spec: REMOVE_FLOW_NODE_TOOL, handler: removeFlowNode },
   { spec: CONNECT_FLOW_NODES_TOOL, handler: connectFlowNodes },
   { spec: REMOVE_FLOW_EDGE_TOOL, handler: removeFlowEdge },
+  // Flow run history: start a run, then list/inspect runs + the docs each produced.
+  { spec: START_FLOW_RUN_TOOL, handler: startFlowRunTool },
+  { spec: LIST_FLOW_RUNS_TOOL, handler: listFlowRunsTool },
+  { spec: GET_FLOW_RUN_TOOL, handler: getFlowRunTool },
+  // Workspace-wide: completed runs + the exact docs each produced (discovery).
+  { spec: LIST_FLOW_RUN_OUTPUTS_TOOL, handler: listFlowRunOutputsTool },
   // Phase 9.5: notify_members — sends in-app notifications to workspace members.
   { spec: NOTIFY_MEMBERS_TOOL, handler: notifyMembers },
   // Sprint 4 E.1-E.2: project tools — available in both workspace modes.

@@ -1,8 +1,8 @@
-import { FileText, Layers, MessageSquare, GitBranch, Plus } from 'lucide-react';
+import { FileText, Layers, MessageSquare, GitBranch, Plus, FilePlus2 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { MonoLabel } from '../ui/typography';
 
-type NodeKind = 'doc' | 'docs' | 'instruction' | 'decision';
+type NodeKind = 'doc' | 'docs' | 'instruction' | 'decision' | 'capture';
 
 interface PaletteItem {
   kind: NodeKind;
@@ -35,6 +35,12 @@ const ITEMS: PaletteItem[] = [
     label: 'Instruction',
     icon: <MessageSquare size={13} strokeWidth={1.75} />,
     description: 'Plain text instruction for Claude',
+  },
+  {
+    kind: 'capture',
+    label: 'Capture',
+    icon: <FilePlus2 size={13} strokeWidth={1.75} className="text-[#2dd4bf]" />,
+    description: 'Agent writes a doc at runtime',
   },
   {
     kind: 'decision',
