@@ -16,7 +16,7 @@ Report it privately, one of two ways:
    advisory visible only to you and the maintainer. It keeps the whole
    conversation — and any fix — in one place until it's ready to disclose.
 2. **Email (fallback).** If you can't use GitHub's flow, email
-   **security@theboringpeople.in** with the details. Please include
+   **mnema@theboringpeople.in** with the details. Please include
    "Mnema security" in the subject so it routes correctly.
 
 Whichever you use, a useful report includes:

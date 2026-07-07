@@ -28,5 +28,5 @@ the lead maintainer's discretion.
 - **General / support / bugs / features** — [GitHub Issues](https://github.com/nbkdoesntknowcoding/mnema/issues)
   (see [SUPPORT.md](./SUPPORT.md)).
 - **Security** — privately, per [SECURITY.md](./SECURITY.md).
-- **Conduct** — conduct@theboringpeople.in (see [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)).
+- **Conduct** — mnema@theboringpeople.in (see [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)).
 - **Enterprise / commercial** — via the website.

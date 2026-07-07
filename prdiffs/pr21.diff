@@ -1,0 +1,312 @@
+diff --git a/apps/api/src/lib/dev/optimization/prompt.ts b/apps/api/src/lib/dev/optimization/prompt.ts
+new file mode 100644
+index 000000000..bccf57553
+--- /dev/null
++++ b/apps/api/src/lib/dev/optimization/prompt.ts
+@@ -0,0 +1,78 @@
++import Anthropic from '@anthropic-ai/sdk';
++import pino from 'pino';
++
++const log = pino({ name: 'optimization-prompt' });
++
++export interface PromptableFinding {
++  rule: string;
++  description: string;
++  suggestedAction: string;
++  taskTitle?: string | null;
++}
++
++const STATIC_FALLBACK_TEMPLATE = (f: PromptableFinding): string =>
++  `Mnema's optimization analysis flagged the following in your recent work${f.taskTitle ? ` on "${f.taskTitle}"` : ''}:
++
++Finding (${f.rule}): ${f.description}
++
++Recommended change: ${f.suggestedAction}
++
++Adjust your workflow accordingly from your next session onward, and mention in
++your completion summary how you incorporated this.`.trim();
++
++/**
++ * Turns an optimization finding into a paste-ready instruction an agent can
++ * act on. Uses the same pattern as retry/fix-prompt.ts: LLM-generated when
++ * ANTHROPIC_API_KEY is set, deterministic template otherwise — the endpoint
++ * works on every self-host install either way.
++ */
++export async function generateOptimizationPrompt(
++  finding: PromptableFinding,
++): Promise<{ prompt: string; model: string; usedFallback: boolean }> {
++  if (!process.env.ANTHROPIC_API_KEY) {
++    return {
++      prompt: STATIC_FALLBACK_TEMPLATE(finding),
++      model: 'static-fallback',
++      usedFallback: true,
++    };
++  }
++
++  try {
++    const anthropic = new Anthropic();
++    const response = await anthropic.messages.create({
++      model: 'claude-haiku-4-5-20251001',
++      max_tokens: 512,
++      messages: [{
++        role: 'user',
++        content: `You are turning a workflow-optimization finding into an instruction for an AI coding agent.
++
++Finding rule: ${finding.rule}
++Finding: ${finding.description}
++${finding.taskTitle ? `Related task: "${finding.taskTitle}"` : ''}
++Recommended change: ${finding.suggestedAction}
++
++Write a concise instruction (under 200 words) the agent can follow in its next
++session. It should:
++1. State concretely what behaviour to change and why (tie it to the finding)
++2. Give one specific, actionable technique to apply
++3. Tell the agent to keep its other working practices unchanged
++
++Write only the instruction, no preamble.`,
++      }],
++    });
++
++    const content = response.content[0];
++    const prompt = content?.type === 'text'
++      ? content.text
++      : STATIC_FALLBACK_TEMPLATE(finding);
++
++    return { prompt, model: 'claude-haiku-4-5-20251001', usedFallback: false };
++  } catch (err) {
++    log.warn({ err }, 'Optimization prompt generation failed — using fallback');
++    return {
++      prompt: STATIC_FALLBACK_TEMPLATE(finding),
++      model: 'static-fallback',
++      usedFallback: true,
++    };
++  }
++}
+diff --git a/apps/api/src/routes/optimization.ts b/apps/api/src/routes/optimization.ts
+index df828a468..c937f5914 100644
+--- a/apps/api/src/routes/optimization.ts
++++ b/apps/api/src/routes/optimization.ts
+@@ -1,9 +1,10 @@
+ import { and, count, desc, eq, sql } from 'drizzle-orm';
+ import type { FastifyPluginAsync } from 'fastify';
+ import { withTenant } from '../db/with-tenant.js';
+-import { optimizationFindings, fixHistory } from '../db/schema.js';
++import { optimizationFindings, fixHistory, tasks } from '../db/schema.js';
+ import { requireDevProjectMode } from '../plugins/dev-mode.js';
+ import { runOptimizationForWorkspace } from '../lib/dev/optimization/runner.js';
++import { generateOptimizationPrompt } from '../lib/dev/optimization/prompt.js';
+ 
+ // In-memory rate limiter: workspace_id → last manual run timestamps
+ const manualRunLog = new Map<string, number[]>();
+@@ -97,7 +98,11 @@ export const optimizationRoutes: FastifyPluginAsync = async (app) => {
+         .where(eq(optimizationFindings.id, id)),
+     );
+ 
+-    // If finding has a taskId, append suggestion to task description
++    // If finding has a taskId, append the suggestion to the task description
++    // AND surface it through retry_fix_hint — that's the field get_next_task
++    // reads out to agents ("Fix hint from last attempt"), so applying a
++    // finding actually reaches the next agent that picks the task up
++    // (claim_task clears the hint once consumed).
+     if (finding.taskId) {
+       const taskId = finding.taskId;
+       const suggestedAction = finding.suggestedAction;
+@@ -105,7 +110,8 @@ export const optimizationRoutes: FastifyPluginAsync = async (app) => {
+       await withTenant(tenantId, (tx) =>
+         tx.execute(sql`
+           UPDATE tasks
+-          SET description = COALESCE(description, '') || ${'\n\n---\n**Optimization applied:** ' + suggestedAction}
++          SET description = COALESCE(description, '') || ${'\n\n---\n**Optimization applied:** ' + suggestedAction},
++              retry_fix_hint = ${suggestedAction}
+           WHERE id = ${taskId}
+             AND workspace_id = ${tenantId}
+         `),
+@@ -115,6 +121,68 @@ export const optimizationRoutes: FastifyPluginAsync = async (app) => {
+     return { ok: true };
+   });
+ 
++  // POST /api/optimization/findings/:id/prompt
++  // Generates (and caches on the finding) a paste-ready agent prompt for the
++  // finding — LLM-backed when ANTHROPIC_API_KEY is set, static template
++  // otherwise. Re-requests return the cached prompt without re-billing.
++  app.post('/api/optimization/findings/:id/prompt', async (req, reply) => {
++    if (!req.auth) return reply.code(401).send({ error: 'unauthorized' });
++    const { id } = req.params as { id: string };
++
++    const rows = await withTenant(req.auth.tenant_id, (tx) =>
++      tx
++        .select()
++        .from(optimizationFindings)
++        .where(and(
++          eq(optimizationFindings.id, id),
++          eq(optimizationFindings.workspaceId, req.auth!.tenant_id),
++        ))
++        .limit(1),
++    );
++    const finding = rows[0];
++    if (!finding) return reply.code(404).send({ error: 'finding not found' });
++
++    const cached = (finding.metadata as Record<string, unknown> | null)?.generatedPrompt;
++    if (typeof cached === 'string' && cached.length > 0) {
++      return { prompt: cached, cached: true };
++    }
++
++    let taskTitle: string | null = null;
++    if (finding.taskId) {
++      const taskRows = await withTenant(req.auth.tenant_id, (tx) =>
++        tx
++          .select({ title: tasks.title })
++          .from(tasks)
++          .where(eq(tasks.id, finding.taskId!))
++          .limit(1),
++      );
++      taskTitle = taskRows[0]?.title ?? null;
++    }
++
++    const generated = await generateOptimizationPrompt({
++      rule:            finding.rule,
++      description:     finding.description,
++      suggestedAction: finding.suggestedAction,
++      taskTitle,
++    });
++
++    await withTenant(req.auth.tenant_id, (tx) =>
++      tx
++        .update(optimizationFindings)
++        .set({
++          metadata: {
++            ...((finding.metadata as Record<string, unknown> | null) ?? {}),
++            generatedPrompt:      generated.prompt,
++            generatedPromptModel: generated.model,
++            generatedPromptAt:    new Date().toISOString(),
++          },
++        })
++        .where(eq(optimizationFindings.id, id)),
++    );
++
++    return { prompt: generated.prompt, model: generated.model, usedFallback: generated.usedFallback, cached: false };
++  });
++
+   // POST /api/optimization/findings/:id/dismiss
+   app.post('/api/optimization/findings/:id/dismiss', async (req, reply) => {
+     if (!req.auth) return reply.code(401).send({ error: 'unauthorized' });
+diff --git a/apps/web/src/components/dev/OptimizationPage.tsx b/apps/web/src/components/dev/OptimizationPage.tsx
+index 04632c82e..94e51cb5a 100644
+--- a/apps/web/src/components/dev/OptimizationPage.tsx
++++ b/apps/web/src/components/dev/OptimizationPage.tsx
+@@ -138,6 +138,8 @@ export function OptimizationPage() {
+   const [dismissing, setDismissing] = useState<string | null>(null);
+   const [running, setRunning] = useState(false);
+   const [toast, setToast] = useState<string | null>(null);
++  const [prompts, setPrompts] = useState<Record<string, string>>({});
++  const [generating, setGenerating] = useState<string | null>(null);
+   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+ 
+   const showToast = (msg: string) => {
+@@ -187,6 +189,30 @@ export function OptimizationPage() {
+     setDismissing(null);
+   };
+ 
++  const getPrompt = async (id: string) => {
++    setGenerating(id);
++    try {
++      const res = await fetch(`/api/optimization/findings/${id}/prompt`, { method: 'POST' });
++      const data = (await res.json()) as { prompt?: string };
++      if (data.prompt) setPrompts((prev) => ({ ...prev, [id]: data.prompt! }));
++      else showToast('Prompt generation failed.');
++    } catch {
++      showToast('Prompt generation failed.');
++    }
++    setGenerating(null);
++  };
++
++  const copyPrompt = async (id: string) => {
++    const text = prompts[id];
++    if (!text) return;
++    try {
++      await navigator.clipboard.writeText(text);
++      showToast('Prompt copied — paste it to your agent.');
++    } catch {
++      showToast('Copy failed — select the text manually.');
++    }
++  };
++
+   const runManual = async () => {
+     setRunning(true);
+     const res = await fetch('/api/optimization/run', { method: 'POST' });
+@@ -496,6 +522,75 @@ export function OptimizationPage() {
+                       <span style={{ color: T.amber }}>SUGGESTED ACTION · </span>
+                       {f.suggestedAction}
+                     </div>
++
++                    {/* Agent prompt — generated on demand, paste into any agent */}
++                    <div style={{ marginTop: 12 }}>
++                      {prompts[f.id] ? (
++                        <>
++                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
++                            <span style={{
++                              fontFamily:    T.fontMono,
++                              fontSize:      11,
++                              fontWeight:    500,
++                              color:         T.textMuted,
++                              letterSpacing: '0.06em',
++                              textTransform: 'uppercase',
++                            }}>
++                              Agent Prompt
++                            </span>
++                            <button
++                              onClick={(e) => { e.stopPropagation(); void copyPrompt(f.id); }}
++                              style={{
++                                background:   T.surface2,
++                                color:        T.textPrimary,
++                                border:       `0.5px solid ${T.glassBorder}`,
++                                fontFamily:   T.fontUI,
++                                fontSize:     11,
++                                fontWeight:   500,
++                                padding:      '4px 10px',
++                                borderRadius: 6,
++                                cursor:       'pointer',
++                              }}
++                            >
++                              Copy
++                            </button>
++                          </div>
++                          <div style={{
++                            padding:      '10px 12px',
++                            background:   '#111111',
++                            borderRadius: 6,
++                            border:       `0.5px solid ${T.line}`,
++                            fontFamily:   T.fontMono,
++                            fontSize:     11.5,
++                            lineHeight:   '1.55',
++                            color:        T.textSecondary,
++                            whiteSpace:   'pre-wrap',
++                            userSelect:   'text',
++                          }}>
++                            {prompts[f.id]}
++                          </div>
++                        </>
++                      ) : (
++                        <button
++                          onClick={(e) => { e.stopPropagation(); void getPrompt(f.id); }}
++                          disabled={generating === f.id}
++                          style={{
++                            background:   T.surface2,
++                            color:        T.textPrimary,
++                            border:       `0.5px solid ${T.glassBorder}`,
++                            fontFamily:   T.fontUI,
++                            fontSize:     11.5,
++                            fontWeight:   500,
++                            padding:      '6px 14px',
++                            borderRadius: 6,
++                            cursor:       generating === f.id ? 'wait' : 'pointer',
++                            opacity:      generating === f.id ? 0.6 : 1,
++                          }}
++                        >
++                          {generating === f.id ? 'Generating…' : '✦ Get agent prompt'}
++                        </button>
++                      )}
++                    </div>
+                   </div>
+                   <button
+                     onClick={(e) => { e.stopPropagation(); void dismiss(f.id); }}

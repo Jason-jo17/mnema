@@ -1,0 +1,115 @@
+diff --git a/apps/api/src/routes/dev.ts b/apps/api/src/routes/dev.ts
+index a72fadd00..c1c79817a 100644
+--- a/apps/api/src/routes/dev.ts
++++ b/apps/api/src/routes/dev.ts
+@@ -223,13 +223,14 @@ export const devRoutes: FastifyPluginAsync = async (app) => {
+     const workspaceId = req.auth.tenant_id;
+     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+ 
+-    // Aggregate by date + agent
++    // Aggregate by date + agent + developer (one query, pivoted twice)
+     const rows = await withTenant(workspaceId, (tx) =>
+       tx
+         .select({
+-          date:    sql<string>`date_trunc('day', started_at)::date::text`,
+-          agent:   agentSessions.agent,
+-          costUsd: sum(agentSessions.totalCostUsd),
++          date:        sql<string>`date_trunc('day', started_at)::date::text`,
++          agent:       agentSessions.agent,
++          developerId: agentSessions.developerId,
++          costUsd:     sum(agentSessions.totalCostUsd),
+         })
+         .from(agentSessions)
+         .where(
+@@ -241,21 +242,28 @@ export const devRoutes: FastifyPluginAsync = async (app) => {
+         .groupBy(
+           sql`date_trunc('day', started_at)::date`,
+           agentSessions.agent,
++          agentSessions.developerId,
+         )
+         .orderBy(asc(sql`date_trunc('day', started_at)::date`)),
+     );
+ 
+-    // Pivot into { date, costUsd, byAgent } structure
+-    const dayMap = new Map<string, { date: string; costUsd: number; byAgent: Record<string, number> }>();
++    // Pivot into { date, costUsd, byAgent, byDeveloper } structure
++    const dayMap = new Map<string, {
++      date: string;
++      costUsd: number;
++      byAgent: Record<string, number>;
++      byDeveloper: Record<string, number>;
++    }>();
+     for (const row of rows) {
+       const date = row.date;
+       if (!dayMap.has(date)) {
+-        dayMap.set(date, { date, costUsd: 0, byAgent: {} });
++        dayMap.set(date, { date, costUsd: 0, byAgent: {}, byDeveloper: {} });
+       }
+       const day = dayMap.get(date)!;
+       const cost = Number(row.costUsd ?? 0);
+       day.costUsd += cost;
+       day.byAgent[row.agent] = (day.byAgent[row.agent] ?? 0) + cost;
++      day.byDeveloper[row.developerId] = (day.byDeveloper[row.developerId] ?? 0) + cost;
+     }
+ 
+     return {
+diff --git a/apps/web/src/components/dev/CostDashboard.tsx b/apps/web/src/components/dev/CostDashboard.tsx
+index 7647eabe7..04069314a 100644
+--- a/apps/web/src/components/dev/CostDashboard.tsx
++++ b/apps/web/src/components/dev/CostDashboard.tsx
+@@ -10,8 +10,9 @@ import { T, glassCard } from '../../lib/dev-tokens';
+ interface CostSummary {
+   totalCostUsd: number;
+   activeSessions: number;
+-  byAgent: Record<string, number>;
+-  byDeveloper: Record<string, number>;
++  // The API returns per-group arrays (see /api/dev/cost-summary), not maps.
++  byAgent: Array<{ agent: string; costUsd: number; sessionCount: number }>;
++  byDeveloper: Array<{ developerId: string; costUsd: number; sessionCount: number }>;
+ }
+ 
+ interface DailyEntry {
+@@ -65,11 +66,11 @@ export function CostDashboard() {
+     try {
+       const [s, d, b] = await Promise.all([
+         fetch('/api/dev/cost-summary?period=today').then((r) => r.json()) as Promise<CostSummary>,
+-        fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ daily: DailyEntry[] }>,
++        fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ days: DailyEntry[] }>,
+         fetch('/api/dev/budget').then((r) => r.json()) as Promise<BudgetConfig>,
+       ]);
+       setSummary(s);
+-      setDaily(d.daily ?? []);
++      setDaily(d.days ?? []);
+       setBudget(b);
+       setBudgetForm(b);
+     } catch { /* offline */ }
+@@ -89,8 +90,10 @@ export function CostDashboard() {
+     ? Math.min(100, (monthlyTotal / budget.monthlyBudgetUsd) * 100)
+     : null;
+ 
+-  const topDevs = Object.entries(summary?.byDeveloper ?? {}).sort(([, a], [, b]) => b - a);
+-  const maxDevCost = topDevs[0]?.[1] ?? 1;
++  const topDevs = (summary?.byDeveloper ?? [])
++    .map((d) => [d.developerId, d.costUsd] as const)
++    .sort(([, a], [, b]) => b - a);
++  const maxDevCost = topDevs[0]?.[1] || 1;
+ 
+   const allAgents = Array.from(new Set(daily.flatMap((d) => Object.keys(d.byAgent ?? {}))));
+ 
+diff --git a/apps/web/src/components/dev/TeamPage.tsx b/apps/web/src/components/dev/TeamPage.tsx
+index 2a7efc1a8..78cdbe7a3 100644
+--- a/apps/web/src/components/dev/TeamPage.tsx
++++ b/apps/web/src/components/dev/TeamPage.tsx
+@@ -55,10 +55,10 @@ export function TeamPage() {
+       try {
+         const [s, d] = await Promise.all([
+           fetch('/api/sessions?limit=500').then((r) => r.json()) as Promise<{ sessions: Session[] }>,
+-          fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ daily: DailyEntry[] }>,
++          fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ days: DailyEntry[] }>,
+         ]);
+         setSessions(s.sessions ?? []);
+-        setDaily(d.daily ?? []);
++        setDaily(d.days ?? []);
+       } catch { /* offline */ }
+     })();
+   }, []);

@@ -1,0 +1,67 @@
+diff --git a/apps/web/src/middleware.ts b/apps/web/src/middleware.ts
+index dd9434cab..177c142d4 100644
+--- a/apps/web/src/middleware.ts
++++ b/apps/web/src/middleware.ts
+@@ -20,7 +20,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
+ 
+   const url = new URL(context.request.url);
+   if (url.pathname.startsWith('/app') && !session) {
+-    return context.redirect('/login');
++    // Funnel through the same gateway every /app/*.astro page's own guard
++    // uses (`/auth/login`) rather than duplicating the
++    // AUTH_PROVIDER-vs-WorkOS decision here — see auth/login.astro.
++    return context.redirect('/auth/login');
+   }
+   return next();
+ });
+diff --git a/apps/web/src/pages/auth/login.astro b/apps/web/src/pages/auth/login.astro
+index 819eb05ea..3956ea30f 100644
+--- a/apps/web/src/pages/auth/login.astro
++++ b/apps/web/src/pages/auth/login.astro
+@@ -7,13 +7,13 @@
+  * WorkOS-hosted AuthKit UI entirely.
+  *
+  * Any request without a valid provider (including bare /auth/login) is
+- * bounced back to our own /login page so the custom design is always shown.
++ * bounced back to our own /login page so the custom design is always shown —
++ * except on self-host (AUTH_PROVIDER=password|oidc), where /login's SSO
++ * buttons all point at WorkOS and the real login lives at /auth/local.
+  *
+  * Error bounces from /auth/callback arrive here as ?error=X — those are
+  * also forwarded to /login so users see our error display, not WorkOS's.
+  */
+-import { workos } from '../../lib/workos.ts';
+-
+ const PROVIDER_MAP: Record<string, string> = {
+   google:    'GoogleOAuth',
+   github:    'GitHubOAuth',
+@@ -23,6 +23,7 @@ const PROVIDER_MAP: Record<string, string> = {
+ 
+ const provider = Astro.url.searchParams.get('provider');
+ const error    = Astro.url.searchParams.get('error');
++const authProvider = (import.meta.env.PUBLIC_AUTH_PROVIDER as string | undefined) ?? 'workos';
+ 
+ // Error bounce from callback → forward to our custom login page
+ if (error) {
+@@ -32,10 +33,19 @@ if (error) {
+ const workosProvider = provider ? PROVIDER_MAP[provider] : null;
+ 
+ if (!workosProvider) {
+-  // No valid provider — show the custom login page, not WorkOS's UI
+-  return Astro.redirect('/login');
++  // No valid provider — show the custom login page, not WorkOS's UI.
++  // Self-host (password/oidc) has no WorkOS UI to fall back to — /login's
++  // SSO buttons all point at WorkOS — so send those installs to the local
++  // login instead.
++  return Astro.redirect(authProvider === 'workos' ? '/login' : '/auth/local');
+ }
+ 
++// Imported lazily: lib/workos.ts throws at import time when WORKOS_API_KEY /
++// WORKOS_CLIENT_ID are unset — which .env.example tells self-host installs
++// to do — and a top-level import would 500 this page before the self-host
++// redirect above could run.
++const { workos } = await import('../../lib/workos.ts');
++
+ return Astro.redirect(
+   workos.userManagement.getAuthorizationUrl({
+     provider: workosProvider,

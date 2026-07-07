@@ -1,0 +1,346 @@
+diff --git a/apps/api/drizzle/migrations/0067_task_comments.sql b/apps/api/drizzle/migrations/0067_task_comments.sql
+new file mode 100644
+index 000000000..2be5017e5
+--- /dev/null
++++ b/apps/api/drizzle/migrations/0067_task_comments.sql
+@@ -0,0 +1,32 @@
++-- ── Task comments ─────────────────────────────────────────────────────────────
++-- Human comments on Kanban tasks (review notes, audit-fix guidance). Kept
++-- separate from tasks.description, which agents treat as the task spec.
++-- Fully additive; idempotent.
++
++CREATE TABLE IF NOT EXISTS task_comments (
++  id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
++  workspace_id uuid        NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
++  task_id      uuid        NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
++  author_id    uuid        NOT NULL REFERENCES users(id),
++  body         text        NOT NULL,
++  created_at   timestamptz NOT NULL DEFAULT NOW()
++);
++
++CREATE INDEX IF NOT EXISTS task_comments_task_idx
++  ON task_comments (task_id, created_at);
++
++-- RLS: same pattern as the other dev_project tables (superuser bypass +
++-- workspace isolation via the app.tenant_id GUC).
++ALTER TABLE task_comments ENABLE ROW LEVEL SECURITY;
++
++DO $$
++BEGIN
++  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'task_comments' AND policyname = 'task_comments_superuser') THEN
++    CREATE POLICY "task_comments_superuser" ON task_comments USING (current_user = 'boppl');
++  END IF;
++  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'task_comments' AND policyname = 'task_comments_workspace_isolation') THEN
++    CREATE POLICY "task_comments_workspace_isolation"
++      ON task_comments
++      USING (workspace_id = (current_setting('app.tenant_id', true))::uuid);
++  END IF;
++END $$;
+diff --git a/apps/api/src/db/schema.ts b/apps/api/src/db/schema.ts
+index 1d97bc5fa..657aac920 100644
+--- a/apps/api/src/db/schema.ts
++++ b/apps/api/src/db/schema.ts
+@@ -1296,6 +1296,23 @@ export const tasks = pgTable(
+   }),
+ );
+ 
++// Human comments on Kanban tasks — review notes and audit-fix guidance that
++// don't belong in the task description (which agents treat as the spec).
++export const taskComments = pgTable(
++  'task_comments',
++  {
++    id:          uuid('id').primaryKey().defaultRandom(),
++    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
++    taskId:      uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
++    authorId:    uuid('author_id').notNull().references(() => users.id),
++    body:        text('body').notNull(),
++    createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
++  },
++  (table) => ({
++    taskIdx: index('task_comments_task_idx').on(table.taskId, table.createdAt),
++  }),
++);
++
+ // Agent sessions: created when an agent claims a task. Phase 1 stub —
+ // Phase 2 adds cost, token, and event columns via additive migration.
+ export const agentSessions = pgTable('agent_sessions', {
+diff --git a/apps/api/src/lib/events.ts b/apps/api/src/lib/events.ts
+index e8720cdb9..ad5ccf435 100644
+--- a/apps/api/src/lib/events.ts
++++ b/apps/api/src/lib/events.ts
+@@ -70,9 +70,21 @@ export interface TaskDeletedPayload {
+   workspaceId: string;
+ }
+ 
++export interface TaskCommentedPayload {
++  taskId: string;
++  comment: {
++    id:         string;
++    body:       string;
++    authorId:   string;
++    authorName: string | null;
++    createdAt:  Date;
++  };
++}
++
+ export type WorkspaceEvent =
+   | { type: 'notification'; data: NotificationPayload }
+   | { type: 'task_updated'; data: TaskUpdatedPayload }
++  | { type: 'task_commented'; data: TaskCommentedPayload }
+   | { type: 'task_deleted'; data: TaskDeletedPayload }
+   | { type: 'session_cost_updated'; data: SessionCostUpdatedPayload }
+   | { type: 'session_started';      data: SessionStartedPayload }
+diff --git a/apps/api/src/routes/tasks.ts b/apps/api/src/routes/tasks.ts
+index 566999016..0e3ae78b8 100644
+--- a/apps/api/src/routes/tasks.ts
++++ b/apps/api/src/routes/tasks.ts
+@@ -20,7 +20,7 @@ import { and, asc, desc, eq, gt, isNull, max, sql } from 'drizzle-orm';
+ import type { FastifyPluginAsync } from 'fastify';
+ import { z } from 'zod';
+ import { db } from '../db/index.js';
+-import { agentSessions, tasks } from '../db/schema.js';
++import { agentSessions, taskComments, tasks, users } from '../db/schema.js';
+ import { withTenant } from '../db/with-tenant.js';
+ import { requireDevProjectMode } from '../plugins/dev-mode.js';
+ import { emitWorkspaceEvent } from '../lib/events.js';
+@@ -56,6 +56,10 @@ const reorderSchema = z.object({
+   status:   z.enum(['backlog', 'in_progress', 'review', 'audit_fix', 'done']),
+ });
+ 
++const createCommentSchema = z.object({
++  body: z.string().min(1).max(4000),
++});
++
+ // ── Helpers ───────────────────────────────────────────────────────────────────
+ 
+ /** Fetch a task by id within the current tenant, return null if not found. */
+@@ -527,4 +531,84 @@ export const tasksRoutes: FastifyPluginAsync = async (app) => {
+     emitTaskUpdated(req.auth.tenant_id, updated!, previousStatus, 'user');
+     return updated;
+   });
++
++  // ──────────────────────────────────────────────────────────────────────────
++  // GET /api/tasks/:id/comments — human comments, oldest first
++  // ──────────────────────────────────────────────────────────────────────────
++  app.get('/api/tasks/:id/comments', async (req, reply) => {
++    if (!req.auth) return reply.code(401).send({ error: 'unauthorized' });
++    const { id } = req.params as { id: string };
++
++    const task = await fetchTask(req.auth.tenant_id, id);
++    if (!task) return reply.code(404).send({ error: 'task_not_found' });
++
++    const comments = await withTenant(req.auth.tenant_id, async (tx) =>
++      tx
++        .select({
++          id:         taskComments.id,
++          body:       taskComments.body,
++          authorId:   taskComments.authorId,
++          authorName: users.displayName,
++          createdAt:  taskComments.createdAt,
++        })
++        .from(taskComments)
++        .leftJoin(users, eq(users.id, taskComments.authorId))
++        .where(eq(taskComments.taskId, id))
++        .orderBy(asc(taskComments.createdAt)),
++    );
++
++    return { comments };
++  });
++
++  // ──────────────────────────────────────────────────────────────────────────
++  // POST /api/tasks/:id/comments — add a comment (any status; the Audit/Fix
++  // column is the primary use: reviewers leave guidance next to the blocker)
++  // ──────────────────────────────────────────────────────────────────────────
++  app.post('/api/tasks/:id/comments', async (req, reply) => {
++    if (!req.auth) return reply.code(401).send({ error: 'unauthorized' });
++    const { id } = req.params as { id: string };
++
++    const parsed = createCommentSchema.safeParse(req.body);
++    if (!parsed.success) {
++      return reply.code(400).send({ error: 'invalid_body', details: parsed.error.flatten() });
++    }
++
++    const task = await fetchTask(req.auth.tenant_id, id);
++    if (!task) return reply.code(404).send({ error: 'task_not_found' });
++
++    const [created] = await withTenant(req.auth.tenant_id, async (tx) =>
++      tx
++        .insert(taskComments)
++        .values({
++          workspaceId: req.auth!.tenant_id,
++          taskId:      id,
++          authorId:    req.auth!.sub,
++          body:        parsed.data.body,
++        })
++        .returning(),
++    );
++
++    const [author] = await withTenant(req.auth.tenant_id, async (tx) =>
++      tx
++        .select({ displayName: users.displayName })
++        .from(users)
++        .where(eq(users.id, req.auth!.sub))
++        .limit(1),
++    );
++
++    const comment = {
++      id:         created!.id,
++      body:       created!.body,
++      authorId:   created!.authorId,
++      authorName: author?.displayName ?? null,
++      createdAt:  created!.createdAt,
++    };
++
++    emitWorkspaceEvent(req.auth.tenant_id, {
++      type: 'task_commented',
++      data: { taskId: id, comment },
++    });
++
++    return reply.code(201).send({ comment });
++  });
+ };
+diff --git a/apps/web/src/components/dev/TaskDetailModal.tsx b/apps/web/src/components/dev/TaskDetailModal.tsx
+index e06a8ce8e..fcaa11bbf 100644
+--- a/apps/web/src/components/dev/TaskDetailModal.tsx
++++ b/apps/web/src/components/dev/TaskDetailModal.tsx
+@@ -10,6 +10,14 @@ interface Member {
+   email:       string;
+ }
+ 
++interface TaskComment {
++  id:         string;
++  body:       string;
++  authorId:   string;
++  authorName: string | null;
++  createdAt:  string;
++}
++
+ interface TaskDetailModalProps {
+   task:     Task;
+   onClose:  () => void;
+@@ -65,6 +73,11 @@ export function TaskDetailModal({ task, onClose, onSave, onDelete }: TaskDetailM
+   const [confirmDelete, setConfirmDelete] = useState(false);
+   const [saveError,    setSaveError]    = useState<string | null>(null);
+ 
++  // Comments
++  const [comments,       setComments]       = useState<TaskComment[]>([]);
++  const [commentDraft,   setCommentDraft]   = useState('');
++  const [postingComment, setPostingComment] = useState(false);
++
+   const isDirty =
+     editTitle       !== task.title ||
+     editDescription !== (task.description ?? '') ||
+@@ -92,6 +105,13 @@ export function TaskDetailModal({ task, onClose, onSave, onDelete }: TaskDetailM
+       .catch(() => { /* ignore */ });
+   }, []);
+ 
++  // Fetch comments
++  useEffect(() => {
++    void apiFetch<{ comments: TaskComment[] }>(`/api/tasks/${task.id}/comments`)
++      .then((r) => setComments(r.comments ?? []))
++      .catch(() => { /* ignore */ });
++  }, [task.id]);
++
+   // Close on Escape
+   useEffect(() => {
+     function onKey(e: KeyboardEvent) {
+@@ -122,6 +142,24 @@ export function TaskDetailModal({ task, onClose, onSave, onDelete }: TaskDetailM
+     setTimeout(() => setCopied(false), 1800);
+   }
+ 
++  async function postComment() {
++    const body = commentDraft.trim();
++    if (!body || postingComment) return;
++    setPostingComment(true);
++    try {
++      const r = await apiFetch<{ comment: TaskComment }>(`/api/tasks/${task.id}/comments`, {
++        method: 'POST',
++        body: JSON.stringify({ body }),
++      });
++      setComments((prev) => [...prev, r.comment]);
++      setCommentDraft('');
++    } catch {
++      /* keep the draft so nothing is lost */
++    } finally {
++      setPostingComment(false);
++    }
++  }
++
+   async function handleSave() {
+     if (!isDirty) return;
+     setSaving(true);
+@@ -584,6 +622,74 @@ export function TaskDetailModal({ task, onClose, onSave, onDelete }: TaskDetailM
+             </div>
+           )}
+ 
++          {/* Comments — review notes; on Audit/Fix, guidance for the next attempt */}
++          <div>
++            <div style={sectionLabel}>
++              Comments{comments.length > 0 ? ` · ${comments.length}` : ''}
++            </div>
++            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
++              {comments.map((c) => (
++                <div key={c.id} style={{
++                  background:   T.surface1,
++                  border:       `0.5px solid ${T.line}`,
++                  borderRadius: 10,
++                  padding:      '10px 14px',
++                }}>
++                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
++                    <span style={{ fontSize: 12, fontWeight: 600, color: T.textPrimary }}>
++                      {c.authorName ?? 'Member'}
++                    </span>
++                    <span style={{ fontSize: 10.5, color: T.textMuted, fontFamily: T.fontMono }}>
++                      {new Date(c.createdAt).toLocaleString()}
++                    </span>
++                  </div>
++                  <div style={{ fontSize: 12.5, color: T.textSecondary, lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
++                    {c.body}
++                  </div>
++                </div>
++              ))}
++              <div style={{ display: 'flex', gap: 8 }}>
++                <input
++                  value={commentDraft}
++                  onChange={(e) => setCommentDraft(e.target.value)}
++                  onKeyDown={(e) => { if (e.key === 'Enter') void postComment(); }}
++                  placeholder={task.status === 'audit_fix'
++                    ? 'Add guidance for the next attempt…'
++                    : 'Add a comment…'}
++                  style={{
++                    flex:         1,
++                    background:   T.surface2,
++                    border:       `0.5px solid ${T.line}`,
++                    borderRadius: 8,
++                    padding:      '9px 12px',
++                    color:        T.textPrimary,
++                    fontFamily:   T.fontUI,
++                    fontSize:     12.5,
++                    outline:      'none',
++                  }}
++                />
++                <button
++                  onClick={() => { void postComment(); }}
++                  disabled={!commentDraft.trim() || postingComment}
++                  style={{
++                    padding:      '6px 16px',
++                    borderRadius: 8,
++                    border:       `0.5px solid ${T.glassBorder}`,
++                    background:   T.surface2,
++                    color:        T.textPrimary,
++                    fontSize:     12,
++                    fontWeight:   500,
++                    fontFamily:   T.fontUI,
++                    cursor:       (!commentDraft.trim() || postingComment) ? 'default' : 'pointer',
++                    opacity:      (!commentDraft.trim() || postingComment) ? 0.5 : 1,
++                  }}
++                >
++                  {postingComment ? '…' : 'Post'}
++                </button>
++              </div>
++            </div>
++          </div>
++
+           {/* Save error */}
+           {saveError && (
+             <div style={{
