@@ -55,10 +55,10 @@ export function TeamPage() {
       try {
         const [s, d] = await Promise.all([
           fetch('/api/sessions?limit=500').then((r) => r.json()) as Promise<{ sessions: Session[] }>,
-          fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ daily: DailyEntry[] }>,
+          fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ days: DailyEntry[] }>,
         ]);
         setSessions(s.sessions ?? []);
-        setDaily(d.daily ?? []);
+        setDaily(d.days ?? []);
       } catch { /* offline */ }
     })();
   }, []);

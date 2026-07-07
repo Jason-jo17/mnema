@@ -223,13 +223,14 @@ export const devRoutes: FastifyPluginAsync = async (app) => {
     const workspaceId = req.auth.tenant_id;
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    // Aggregate by date + agent
+    // Aggregate by date + agent + developer (one query, pivoted twice)
     const rows = await withTenant(workspaceId, (tx) =>
       tx
         .select({
-          date:    sql<string>`date_trunc('day', started_at)::date::text`,
-          agent:   agentSessions.agent,
-          costUsd: sum(agentSessions.totalCostUsd),
+          date:        sql<string>`date_trunc('day', started_at)::date::text`,
+          agent:       agentSessions.agent,
+          developerId: agentSessions.developerId,
+          costUsd:     sum(agentSessions.totalCostUsd),
         })
         .from(agentSessions)
         .where(
@@ -241,21 +242,28 @@ export const devRoutes: FastifyPluginAsync = async (app) => {
         .groupBy(
           sql`date_trunc('day', started_at)::date`,
           agentSessions.agent,
+          agentSessions.developerId,
         )
         .orderBy(asc(sql`date_trunc('day', started_at)::date`)),
     );
 
-    // Pivot into { date, costUsd, byAgent } structure
-    const dayMap = new Map<string, { date: string; costUsd: number; byAgent: Record<string, number> }>();
+    // Pivot into { date, costUsd, byAgent, byDeveloper } structure
+    const dayMap = new Map<string, {
+      date: string;
+      costUsd: number;
+      byAgent: Record<string, number>;
+      byDeveloper: Record<string, number>;
+    }>();
     for (const row of rows) {
       const date = row.date;
       if (!dayMap.has(date)) {
-        dayMap.set(date, { date, costUsd: 0, byAgent: {} });
+        dayMap.set(date, { date, costUsd: 0, byAgent: {}, byDeveloper: {} });
       }
       const day = dayMap.get(date)!;
       const cost = Number(row.costUsd ?? 0);
       day.costUsd += cost;
       day.byAgent[row.agent] = (day.byAgent[row.agent] ?? 0) + cost;
+      day.byDeveloper[row.developerId] = (day.byDeveloper[row.developerId] ?? 0) + cost;
     }
 
     return {

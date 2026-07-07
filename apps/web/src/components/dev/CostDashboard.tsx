@@ -10,8 +10,9 @@ import { T, glassCard } from '../../lib/dev-tokens';
 interface CostSummary {
   totalCostUsd: number;
   activeSessions: number;
-  byAgent: Record<string, number>;
-  byDeveloper: Record<string, number>;
+  // The API returns per-group arrays (see /api/dev/cost-summary), not maps.
+  byAgent: Array<{ agent: string; costUsd: number; sessionCount: number }>;
+  byDeveloper: Array<{ developerId: string; costUsd: number; sessionCount: number }>;
 }
 
 interface DailyEntry {
@@ -65,11 +66,11 @@ export function CostDashboard() {
     try {
       const [s, d, b] = await Promise.all([
         fetch('/api/dev/cost-summary?period=today').then((r) => r.json()) as Promise<CostSummary>,
-        fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ daily: DailyEntry[] }>,
+        fetch('/api/dev/cost-daily').then((r) => r.json()) as Promise<{ days: DailyEntry[] }>,
         fetch('/api/dev/budget').then((r) => r.json()) as Promise<BudgetConfig>,
       ]);
       setSummary(s);
-      setDaily(d.daily ?? []);
+      setDaily(d.days ?? []);
       setBudget(b);
       setBudgetForm(b);
     } catch { /* offline */ }
@@ -89,8 +90,10 @@ export function CostDashboard() {
     ? Math.min(100, (monthlyTotal / budget.monthlyBudgetUsd) * 100)
     : null;
 
-  const topDevs = Object.entries(summary?.byDeveloper ?? {}).sort(([, a], [, b]) => b - a);
-  const maxDevCost = topDevs[0]?.[1] ?? 1;
+  const topDevs = (summary?.byDeveloper ?? [])
+    .map((d) => [d.developerId, d.costUsd] as const)
+    .sort(([, a], [, b]) => b - a);
+  const maxDevCost = topDevs[0]?.[1] || 1;
 
   const allAgents = Array.from(new Set(daily.flatMap((d) => Object.keys(d.byAgent ?? {}))));
 
