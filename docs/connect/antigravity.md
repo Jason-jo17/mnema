@@ -59,14 +59,16 @@ approval popup for Mnema.
 ## Prerequisites
 - The script automatically reads the Bearer token from the user's
   `~/.gemini/config/mcp_config.json`.
-- The Mnema `upload_doc_file` tool requires the filename to end with `.docx`
-  or `.pdf`. The script handles this by appending `.docx` to unsupported file
-  extensions automatically.
+- The Mnema `upload_doc_file` tool only accepts real `.docx` and `.pdf` files
+  (it converts them to Markdown). The script uploads those directly and **skips**
+  any other file type with a warning — it does not rename or convert them, since
+  a renamed file (e.g. `notes.md` → `notes.docx`) is not valid OpenXML and fails
+  at ingest.
 
 ## Usage
-Run the bundled python script to upload files:
+Run the bundled python script to upload one or more `.docx`/`.pdf` files:
 
-    python ~/.gemini/config/skills/mnema-direct-upload/scripts/upload.py path/to/file1.md path/to/file2.docx
+    python3 ~/.gemini/config/skills/mnema-direct-upload/scripts/upload.py report.docx spec.pdf
 ```
 
 ### scripts/upload.py
@@ -121,9 +123,6 @@ def bearer_token(server):
 
 def upload(url, token, path, req_id):
     filename = path.name
-    if path.suffix.lower() not in (".docx", ".pdf"):
-        # upload_doc_file only accepts .docx/.pdf filenames.
-        filename = path.name + ".docx"
     payload = {
         "jsonrpc": "2.0",
         "id": req_id,
@@ -159,8 +158,14 @@ def main():
     cfg = json.loads(CONFIG_PATH.read_text())
     url, server = find_mnema_server(cfg)
     token = bearer_token(server)
-    for i, arg in enumerate(sys.argv[1:], start=1):
-        upload(url, token, Path(arg), i)
+    req_id = 0
+    for arg in sys.argv[1:]:
+        path = Path(arg)
+        if path.suffix.lower() not in (".docx", ".pdf"):
+            print(f"skipped {path}: only .docx and .pdf are supported")
+            continue
+        req_id += 1
+        upload(url, token, path, req_id)
 
 
 if __name__ == "__main__":
