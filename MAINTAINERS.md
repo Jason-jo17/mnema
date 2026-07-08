@@ -6,6 +6,7 @@ picture of who steers it:
 ## Lead maintainer (BDFL)
 
 - **Nischay** — [@nbkdoesntknowcoding](https://github.com/nbkdoesntknowcoding)
+- **Jason** - [@Jason-jo17](https://github.com/Jason-jo17)
 
 Nischay is the lead maintainer and the project's benevolent dictator for life:
 the final call on direction, what lands, and what ships rests here. See
