@@ -21,15 +21,18 @@
     "@eslint/js": "^9.13.0",
     "eslint": "^9.13.0",
     "globals": "^17.7.0",
-    "prettier": "^3.3.0",
+    "prettier": "^3.9.4",
     "typescript": "^5.6.0",
-    "typescript-eslint": "^8.12.0"
+    "typescript-eslint": "^8.63.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
       "sharp"
-    ]
+    ],
+    "overrides": {
+      "ioredis": "5.11.1"
+    }
   },
   "packageManager": "pnpm@10.23.0+sha512.21c4e5698002ade97e4efe8b8b4a89a8de3c85a37919f957e7a0f30f38fbc5bbdd05980ffe29179b2fb6e6e691242e098d945d1601772cad0fef5fb6411e2a4b"
 }
