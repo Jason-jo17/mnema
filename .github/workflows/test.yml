@@ -99,6 +99,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Build workspace packages (@boppl/schema, @boppl/shared) so apps that
+      # import their compiled dist/ resolve during typecheck, migrations, and tests.
+      - name: Build workspace packages
+        run: pnpm -r --filter "./packages/**" build
+
       # OAuth AS RSA keypair — required at config load (see env.ts). Generated
       # fresh per run into the paths referenced by OAUTH_*_KEY_PATH; never committed.
       - name: Generate test OAuth keypair
