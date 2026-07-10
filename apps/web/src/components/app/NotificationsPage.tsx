@@ -5,6 +5,8 @@
  */
 import { type JSX, useEffect, useState } from 'react';
 import { api, type AccessRequest } from '../../lib/api';
+import { EmptyState } from '../ui/EmptyState';
+import { CheckCircle, BellOff } from 'lucide-react';
 
 const ink = 'var(--ink)';
 const soft = 'var(--ink-soft)';
@@ -82,8 +84,11 @@ export function NotificationsPage(): JSX.Element {
       {loading ? (
         <div style={{ color: muted, fontSize: 13, padding: '24px 4px' }}>Loading…</div>
       ) : shown.length === 0 ? (
-        <div style={{ ...card, textAlign: 'center', color: muted, padding: '48px 24px' }}>
-          {filter === 'unread' ? 'Nothing unread.' : 'No notifications yet.'}
+        <div style={{ ...card, padding: 0 }}>
+          <EmptyState
+            title={items.length === 0 ? 'No notifications yet' : 'All caught up!'}
+            icon={items.length === 0 ? <BellOff size={32} strokeWidth={1.5} /> : <CheckCircle size={32} strokeWidth={1.5} />}
+          />
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
