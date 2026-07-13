@@ -137,7 +137,7 @@ function chip(active: boolean): React.CSSProperties {
   return { padding: '6px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: active ? 600 : 400, color: active ? ink : muted, background: active ? 'var(--surface-2, #f4f4f5)' : 'transparent', border: `1px solid ${active ? line : 'transparent'}`, cursor: 'pointer' };
 }
 function btn(color: string, filled: boolean): React.CSSProperties {
-  return { fontSize: 12.5, fontWeight: 500, color: filled ? 'var(--on-ink)' : color, background: filled ? color : 'none', border: `0.5px solid ${color}`, borderRadius: 7, padding: '5px 12px', cursor: 'pointer' };
+  return { fontSize: 12.5, fontWeight: 500, color: filled ? 'var(--on-solid)' : color, background: filled ? color : 'none', border: `0.5px solid ${color}`, borderRadius: 7, padding: '5px 12px', cursor: 'pointer' };
 }
 function relTime(iso: string): string {
   const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);

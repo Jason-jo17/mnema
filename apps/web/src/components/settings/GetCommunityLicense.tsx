@@ -73,7 +73,7 @@ export function GetCommunityLicense(): JSX.Element {
                 style={{ flex: 1, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--line,#2c2c31)', background: 'var(--bg,#1b1b1e)', color: 'inherit', fontSize: 14 }}
               />
               <button type="submit" disabled={state === 'sending'}
-                style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent,#6366f1)', color: 'var(--on-ink)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+                style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent,#6366f1)', color: 'var(--on-solid)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
                 {state === 'sending' ? 'Sending…' : 'Get my key'}
               </button>
             </form>

@@ -128,7 +128,7 @@ export function CommunitySettings(): JSX.Element {
                 />
                 <button
                   type="submit" disabled={keyState === 'sending'}
-                  style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent, #6366f1)', color: 'var(--on-ink)', fontSize: 14, fontWeight: 600, cursor: keyState === 'sending' ? 'default' : 'pointer' }}
+                  style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent, #6366f1)', color: 'var(--on-solid)', fontSize: 14, fontWeight: 600, cursor: keyState === 'sending' ? 'default' : 'pointer' }}
                 >
                   {keyState === 'sending' ? 'Sending…' : 'Email me a key'}
                 </button>
