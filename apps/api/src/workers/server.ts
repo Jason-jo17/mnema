@@ -12,6 +12,7 @@
 import { startEmbeddingsWorker } from './embeddings/worker.js';
 import { startEmailWorker } from './email/worker.js';
 import { startHookEventsWorker } from './hook-events/worker.js';
+import { startDriveSyncWorker } from './drive-sync/worker.js';
 import { startRetryWorker } from './retry/worker.js';
 import { startCronWorkers } from './cron.js';
 import { startPdfGenerationWorker } from './pdf-generation/worker.js';
@@ -28,6 +29,10 @@ console.log('[workers] email worker started');
 const hookEventsWorker = startHookEventsWorker();
 // eslint-disable-next-line no-console
 console.log('[workers] hook-events worker started');
+
+const driveSyncWorker = startDriveSyncWorker();
+// eslint-disable-next-line no-console
+console.log('[workers] drive-sync worker started');
 
 const retryWorker = startRetryWorker();
 // eslint-disable-next-line no-console
@@ -58,6 +63,7 @@ const shutdown = async (signal: string): Promise<void> => {
   await embeddings.close();
   await emailWorker.close();
   await hookEventsWorker.close();
+  await driveSyncWorker.close();
   await retryWorker.close();
   await cronWorkers.close();
   if (pdfWorker) await pdfWorker.close();

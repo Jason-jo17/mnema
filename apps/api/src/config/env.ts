@@ -224,6 +224,21 @@ const envSchema = z.object({
   GOOGLE_CALENDAR_CLIENT_SECRET: z.string().min(1).optional(),
   GOOGLE_CALENDAR_REDIRECT_URI:  z.string().url().optional(),
 
+  // Phase 10 — Google Drive folder sync (optional; drive routes return 503 when
+  // unset). Bring-your-own OAuth client, same shape as calendar above. The
+  // redirect URI must equal the /api/drive/callback URL and be registered as an
+  // authorised redirect URI in Google Cloud Console.
+  GOOGLE_DRIVE_CLIENT_ID:     z.string().min(1).optional(),
+  GOOGLE_DRIVE_CLIENT_SECRET: z.string().min(1).optional(),
+  GOOGLE_DRIVE_REDIRECT_URI:  z.string().url().optional(),
+  // 'drive.file' (least privilege — Mnema only sees files it created or the user
+  // explicitly opens via the picker) or 'drive' (full — lets users pull
+  // pre-existing Drive folders; requires Google's restricted-scope review to ship
+  // to real users in production).
+  GOOGLE_DRIVE_SCOPE:         z.enum(['drive.file', 'drive']).default('drive.file'),
+  // Skip Drive files larger than this many megabytes when syncing.
+  DRIVE_SYNC_MAX_FILE_MB:     z.coerce.number().int().positive().default(50),
+
   // Phase C — internal meeting-bot controller (the express service that asks
   // Recall to send the bot). Defaults to the Docker-network address; the API
   // POSTs /join here when an admitted meeting is starting soon.

@@ -79,6 +79,10 @@ const OVERRIDES = {
   '@sentry/cli-win32-arm64': 'MIT',
   '@sentry/cli-win32-i686': 'MIT',
   '@sentry/cli-win32-x64': 'MIT',
+  // url-template -> BSD-3-Clause (its bundled LICENSE is the 3-clause BSD text;
+  // package.json reports the legacy non-SPDX "BSD"). Transitive dep pulled in by
+  // googleapis via googleapis-common.
+  'url-template': 'BSD-3-Clause',
 };
 
 function isAllowedAtom(atom) {
