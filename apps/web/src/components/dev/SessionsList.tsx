@@ -152,9 +152,21 @@ const STATUS_DOT: Record<string, { color: string; pulse: boolean }> = {
   error:     { color: T.red,          pulse: false },
 };
 
+// Human-readable status labels, shown next to the colour dot so status is not
+// conveyed by colour alone — matters for colour-blind users, and because
+// `failed` and `error` share the same red (a11y: WCAG 1.4.1 Use of Colour).
+const STATUS_LABEL: Record<string, string> = {
+  active:    'Active',
+  completed: 'Completed',
+  failed:    'Failed',
+  stalled:   'Stalled',
+  error:     'Error',
+};
+
 // ── Grid column definition (matches Sessions.html spec) ───────────────────────
-// 28px | 110px | 160px | 110px | minmax(0,1fr) | 80px | 90px | 110px
-const GRID = '28px 110px 160px 110px minmax(0,1fr) 80px 90px 110px';
+// status | 110px | 160px | 110px | minmax(0,1fr) | 80px | 90px | 110px
+// First column widened from 28px to fit the status dot + its text label.
+const GRID = '96px 110px 160px 110px minmax(0,1fr) 80px 90px 110px';
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -459,7 +471,7 @@ export function SessionsList({ workspaceId: _workspaceId }: SessionsListProps): 
         top:                   0,
         zIndex:                2,
       }}>
-        <span />
+        <span>STATUS</span>
         <span>SESSION</span>
         <span>DEVELOPER</span>
         <span>AGENT</span>
@@ -583,6 +595,7 @@ export function SessionsList({ workspaceId: _workspaceId }: SessionsListProps): 
 
 function SessionRow({ session }: { session: SessionSummary }): JSX.Element {
   const dot = STATUS_DOT[session.status] ?? STATUS_DOT.completed!;
+  const statusLabel = STATUS_LABEL[session.status] ?? session.status;
 
   const handleClick = () => {
     window.location.href = `/app/sessions/${session.id}`;
@@ -612,9 +625,12 @@ function SessionRow({ session }: { session: SessionSummary }): JSX.Element {
           session.status === 'active' ? 'rgba(74,222,128,0.03)' : 'transparent';
       }}
     >
-      {/* Status dot */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {/* Status — colour dot + text label so status is not conveyed by colour alone */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
         <span
+          role="img"
+          aria-label={`Status: ${statusLabel}`}
+          title={statusLabel}
           style={{
             width:        8,
             height:       8,
@@ -625,6 +641,16 @@ function SessionRow({ session }: { session: SessionSummary }): JSX.Element {
             boxShadow:    dot.pulse ? `0 0 6px ${dot.color}` : 'none',
           }}
         />
+        <span style={{
+          fontSize:     11,
+          fontWeight:   500,
+          color:        dot.color,
+          overflow:     'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace:   'nowrap',
+        }}>
+          {statusLabel}
+        </span>
       </div>
 
       {/* Session ID */}
