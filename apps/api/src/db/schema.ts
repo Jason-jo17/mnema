@@ -105,6 +105,8 @@ export const workspaceMembers = pgTable(
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
     // Phase C — encrypted Google Calendar refresh token (per member).
     calendarRefreshToken: text('calendar_refresh_token'),
+    // Phase 10 — encrypted Google Drive refresh token (per member).
+    driveRefreshToken: text('drive_refresh_token'),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.workspaceId, table.userId] }),
@@ -1678,6 +1680,78 @@ export const attachments = pgTable(
     workspaceIdx: index('attachments_workspace_idx').on(table.workspaceId),
     docIdx:       index('attachments_doc_idx').on(table.docId),
     statusIdx:    index('attachments_status_idx').on(table.status),
+  }),
+);
+
+// ─── GOOGLE DRIVE SYNC ────────────────────────────────────────────────────────
+// Phase 10 — links a Mnema folder to a Google Drive folder and tracks per-file
+// sync state. Core-only: references folders/docs/attachments/users/workspaces,
+// no enterprise coupling. The encrypted refresh token lives on workspace_members
+// (drive_refresh_token, above); these two tables hold the links + file mappings.
+
+export const driveFolderLinks = pgTable(
+  'drive_folder_links',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    // The Mnema folder that mirrors a Drive folder.
+    folderId: uuid('folder_id').notNull().references(() => folders.id, { onDelete: 'cascade' }),
+    // The Google Drive folder id + display name (for the UI).
+    driveFolderId: text('drive_folder_id').notNull(),
+    driveFolderName: text('drive_folder_name'),
+    // Whose encrypted Drive token drives the sync for this link.
+    connectedBy: uuid('connected_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    // 'pull' (Drive→Mnema), 'push' (Mnema→Drive), or 'both'.
+    direction: text('direction').notNull().default('both'),
+    // Allow-listed extensions synced (lowercase, no dot). Empty = built-in defaults.
+    acceptedTypes: text('accepted_types').array().notNull().default(sql`ARRAY[]::text[]`),
+    // 'lww' (last-writer-wins by modified time) or 'manual' (flag conflicts, never overwrite).
+    conflictPolicy: text('conflict_policy').notNull().default('manual'),
+    // Drive changes-API cursor for incremental pulls.
+    drivePageToken: text('drive_page_token'),
+    // Drive push-notification channel (id + expiry) so we can stop/renew it.
+    driveChannelId: text('drive_channel_id'),
+    driveChannelExpiresAt: timestamp('drive_channel_expires_at', { withTimezone: true }),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    // 'active' | 'paused' | 'error'
+    status: text('status').notNull().default('active'),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index('drive_links_workspace_idx').on(table.workspaceId),
+    folderUnique: uniqueIndex('drive_links_folder_unique').on(table.folderId),
+    driveFolderUnique: uniqueIndex('drive_links_ws_drivefolder_unique').on(table.workspaceId, table.driveFolderId),
+  }),
+);
+
+export const driveFileMappings = pgTable(
+  'drive_file_mappings',
+  {
+    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+    linkId: uuid('link_id').notNull().references(() => driveFolderLinks.id, { onDelete: 'cascade' }),
+    // The Google Drive file id.
+    driveFileId: text('drive_file_id').notNull(),
+    driveName: text('drive_name'),
+    // Where it landed in Mnema — a doc (md/txt) or an attachment (binary). One is set.
+    docId: uuid('doc_id').references(() => docs.id, { onDelete: 'set null' }),
+    attachmentId: uuid('attachment_id').references(() => attachments.id, { onDelete: 'set null' }),
+    // Drive checksum (md5Checksum) + the Mnema-side content hash, for change detection.
+    driveMd5: text('drive_md5'),
+    contentHash: text('content_hash'),
+    driveModifiedAt: timestamp('drive_modified_at', { withTimezone: true }),
+    mnemaModifiedAt: timestamp('mnema_modified_at', { withTimezone: true }),
+    // 'synced' | 'pending_push' | 'pending_pull' | 'conflict'
+    syncState: text('sync_state').notNull().default('synced'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    linkIdx: index('drive_map_link_idx').on(table.linkId),
+    driveFileUnique: uniqueIndex('drive_map_link_file_unique').on(table.linkId, table.driveFileId),
+    docIdx: index('drive_map_doc_idx').on(table.docId),
+    attachmentIdx: index('drive_map_attachment_idx').on(table.attachmentId),
   }),
 );
 
