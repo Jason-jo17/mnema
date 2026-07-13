@@ -27,6 +27,10 @@
   --ink-muted:   #6E737C;
   --ink-faint:   #3F434B;
   --on-ink:      #0A0B0D;
+  /* Foreground for a filled saturated-colour control (indigo primary, red
+     danger). Stays light in both themes — its contrast is with the button's
+     own colour, not the page — unlike --on-ink, which flips with the theme. */
+  --on-solid:    #FFFFFF;
 
   /* Accent — warm amber used across app surfaces */
   --accent-rgb:  255, 179, 112;
@@ -224,6 +228,7 @@
   --ink-muted:   #8A8F98;
   --ink-faint:   #C2C5CA;
   --on-ink:      #FFFFFF;
+  --on-solid:    #FFFFFF;
 
   --status-success:    #15803d;
   --status-success-bg: rgba(21, 128, 61, 0.08);

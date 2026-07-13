@@ -210,7 +210,7 @@ function CreateModal({ onClose, onCreate }: CreateModalProps): JSX.Element {
             disabled={submitting}
             style={{
               padding: '8px 20px', borderRadius: '8px',
-              background: 'rgba(99,102,241,0.8)', color: '#fff',
+              background: 'rgba(99,102,241,0.8)', color: 'var(--on-solid)',
               border: 'none', fontSize: '14px', cursor: submitting ? 'not-allowed' : 'pointer',
               opacity: submitting ? 0.6 : 1,
             }}
@@ -321,7 +321,7 @@ function PlaintextModal({ plaintext, onClose }: PlaintextModalProps): JSX.Elemen
             style={{
               padding: '8px 20px', borderRadius: '8px',
               background: confirmed ? 'rgba(99,102,241,0.8)' : 'rgba(99,102,241,0.3)',
-              color: '#fff', border: 'none',
+              color: 'var(--on-solid)', border: 'none',
               fontSize: '14px', cursor: confirmed ? 'pointer' : 'not-allowed',
             }}
           >
@@ -383,7 +383,7 @@ export function ApiKeys(): JSX.Element {
           onClick={() => { setShowCreate(true); }}
           style={{
             padding: '8px 16px', borderRadius: '8px',
-            background: 'rgba(99,102,241,0.8)', color: '#fff',
+            background: 'rgba(99,102,241,0.8)', color: 'var(--on-solid)',
             border: 'none', fontSize: '14px', cursor: 'pointer',
           }}
         >
@@ -474,7 +474,7 @@ export function ApiKeys(): JSX.Element {
                   disabled={revoking === key.id}
                   style={{
                     padding: '4px 10px', borderRadius: '6px',
-                    background: 'rgba(239,68,68,0.8)', color: '#fff',
+                    background: 'rgba(239,68,68,0.8)', color: 'var(--on-solid)',
                     border: 'none', fontSize: '12px', cursor: 'pointer',
                   }}
                 >

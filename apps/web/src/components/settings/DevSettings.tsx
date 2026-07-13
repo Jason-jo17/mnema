@@ -127,7 +127,7 @@ export function DevSettings({ workspaceId, isOwner }: DevSettingsProps): JSX.Ele
                 disabled={enabling}
                 style={{
                   padding: '8px 18px', borderRadius: 7, fontSize: 13, fontWeight: 600,
-                  border: 'none', background: '#6366f1', color: '#fff',
+                  border: 'none', background: '#6366f1', color: 'var(--on-solid)',
                   cursor: enabling ? 'wait' : 'pointer', opacity: enabling ? 0.7 : 1,
                 }}
               >
@@ -232,7 +232,7 @@ export function DevSettings({ workspaceId, isOwner }: DevSettingsProps): JSX.Ele
                     disabled={regenerating}
                     style={{
                       padding: '5px 12px', borderRadius: 5, fontSize: 11, fontWeight: 600,
-                      border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer',
+                      border: 'none', background: '#ef4444', color: 'var(--on-solid)', cursor: 'pointer',
                       opacity: regenerating ? 0.6 : 1,
                     }}
                   >

@@ -92,7 +92,7 @@ export class ErrorBoundary extends Component<Props, State> {
               onClick={this.handleRefresh}
               style={{
                 background: 'var(--accent, #6366f1)',
-                color: '#fff',
+                color: 'var(--on-ink)',
                 border: 'none',
                 borderRadius: '6px',
                 padding: '8px 16px',

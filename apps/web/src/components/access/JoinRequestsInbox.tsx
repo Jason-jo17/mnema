@@ -101,7 +101,7 @@ export function JoinRequestsInbox(): JSX.Element {
 }
 
 const card: React.CSSProperties = { background: surface, border: `0.5px solid ${line}`, borderRadius: 10, padding: 14 };
-const badge: React.CSSProperties = { marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: '#fff', background: accent, borderRadius: 20, padding: '0 6px', minWidth: 16, display: 'inline-block', textAlign: 'center', verticalAlign: 'middle' };
+const badge: React.CSSProperties = { marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: 'var(--on-ink)', background: accent, borderRadius: 20, padding: '0 6px', minWidth: 16, display: 'inline-block', textAlign: 'center', verticalAlign: 'middle' };
 function btn(color: string, filled: boolean): React.CSSProperties {
   return { fontSize: 12.5, fontWeight: 500, color: filled ? '#fff' : color, background: filled ? color : 'none', border: `0.5px solid ${color}`, borderRadius: 7, padding: '5px 12px', cursor: 'pointer' };
 }
