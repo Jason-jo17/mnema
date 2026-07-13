@@ -555,11 +555,89 @@ export function KanbanBoard({ workspaceId }: KanbanBoardProps): JSX.Element {
         }
         .kanban-hscroll:hover::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.30); background-clip: content-box; }
       `}</style>
+      {filteredTasks.length === 0 && (
+        <div style={{
+          flex:           1,
+          minHeight:      0,
+          display:        'flex',
+          alignItems:     'center',
+          justifyContent: 'center',
+        }}>
+          <div style={{
+            display:       'flex',
+            flexDirection: 'column',
+            alignItems:    'center',
+            textAlign:     'center',
+            padding:       '48px 32px',
+            maxWidth:      420,
+            background:    T.surface1,
+            border:        `0.5px solid ${T.glassBorder}`,
+            borderRadius:  12,
+          }}>
+            <div style={{
+              width:          48,
+              height:         48,
+              borderRadius:   10,
+              background:     T.surface2,
+              border:         `0.5px solid ${T.glassBorder}`,
+              display:        'inline-flex',
+              alignItems:     'center',
+              justifyContent: 'center',
+              color:          T.textSecondary,
+              marginBottom:   18,
+            }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3"  y="4" width="4" height="16" rx="1" />
+                <rect x="10" y="4" width="4" height="10" rx="1" />
+                <rect x="17" y="4" width="4" height="13" rx="1" />
+              </svg>
+            </div>
+            <h3 style={{
+              margin:        '0 0 8px',
+              fontSize:      16,
+              fontWeight:    600,
+              color:         T.textPrimary,
+              fontFamily:    T.fontUI,
+              letterSpacing: '-0.01em',
+            }}>
+              No tasks yet
+            </h3>
+            <p style={{
+              margin:     '0 0 18px',
+              fontSize:   13,
+              lineHeight: 1.55,
+              color:      T.textSecondary,
+              maxWidth:   300,
+            }}>
+              {activeProject
+                ? `No tasks in ${activeProject.name} yet — add one to start tracking work on the board.`
+                : 'Add your first task to start tracking work across the board.'}
+            </p>
+            <button
+              onClick={() => { setShowAddModal(true); }}
+              style={{
+                padding:       '8px 16px',
+                borderRadius:  8,
+                border:        'none',
+                background:    T.accent,
+                color:         '#0A0B0D',
+                fontSize:      13,
+                fontWeight:    600,
+                cursor:        'pointer',
+                fontFamily:    T.fontUI,
+                letterSpacing: '-0.01em',
+              }}
+            >
+              + Add task
+            </button>
+          </div>
+        </div>
+      )}
       <div
         ref={boardScrollRef}
         className="kanban-hscroll"
         style={{
-          display:          'grid',
+          display:          filteredTasks.length === 0 ? 'none' : 'grid',
           gridAutoFlow:     'column',
           gridAutoColumns:  '280px',
           gap:              16,
