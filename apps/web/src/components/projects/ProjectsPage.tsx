@@ -339,32 +339,36 @@ function CardMenu({ onEdit, onDuplicate, onManageAccess, onDelete }: { onEdit: (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        aria-label="Project menu"
+        title="Project menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
         style={{ width: 26, height: 26, borderRadius: 6, border: `0.5px solid ${T.glassBorder}`, background: open ? T.surface3 : 'transparent', color: T.textMuted, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: T.fontUI }}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
       </button>
       {open && (
         <div style={{ position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 60, background: T.surface2, border: `0.5px solid ${T.glassBorder}`, borderRadius: 10, overflow: 'hidden', minWidth: 148, boxShadow: '0 8px 28px rgba(0,0,0,0.45)' }}>
-          <button style={item} onClick={() => { setOpen(false); onEdit(); }}
+          <button style={item} aria-label="Edit project" onClick={() => { setOpen(false); onEdit(); }}
             onMouseEnter={(e) => (e.currentTarget.style.background = T.surface3)}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>
             Edit
           </button>
-          <button style={item} onClick={() => { setOpen(false); onDuplicate(); }}
+          <button style={item} aria-label="Duplicate project" onClick={() => { setOpen(false); onDuplicate(); }}
             onMouseEnter={(e) => (e.currentTarget.style.background = T.surface3)}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             Duplicate
           </button>
-          <button style={item} onClick={() => { setOpen(false); onManageAccess(); }}
+          <button style={item} aria-label="Manage project access" onClick={() => { setOpen(false); onManageAccess(); }}
             onMouseEnter={(e) => (e.currentTarget.style.background = T.surface3)}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             Manage access
           </button>
           <div style={{ height: '0.5px', background: T.glassBorder, margin: '2px 0' }} />
-          <button style={{ ...item, color: T.red }} onClick={() => { setOpen(false); onDelete(); }}
+          <button style={{ ...item, color: T.red }} aria-label="Archive project" onClick={() => { setOpen(false); onDelete(); }}
             onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(248,113,113,0.08)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
